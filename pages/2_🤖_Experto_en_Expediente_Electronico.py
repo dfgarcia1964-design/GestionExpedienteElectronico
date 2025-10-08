@@ -1,6 +1,6 @@
 # Importación de bibliotecas necesarias
 import os
-import openai
+from openai import OpenAI
 import streamlit as st
 import time
 from io import BytesIO
@@ -46,9 +46,6 @@ if not ASSISTANT_ID:
     st.stop()
 
 assistant_id = ASSISTANT_ID
-
-# Inicialización del cliente de OpenAI
-client = openai
 
 
 def get_binary_file_downloader_html(url, file_label="File"):
@@ -185,7 +182,8 @@ if not API_KEY:
     st.sidebar.error("Por favor, proporciona una clave API para continuar.")
     st.stop()
 
-openai.api_key = API_KEY
+# Inicialización del cliente de OpenAI con la API key
+client = OpenAI(api_key=API_KEY)
 
 
 def process_message_with_citations(message):
