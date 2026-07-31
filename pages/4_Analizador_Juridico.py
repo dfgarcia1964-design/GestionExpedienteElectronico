@@ -7,6 +7,9 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 from PyPDF2 import PdfReader
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Pt
 
 
 st.set_page_config(
@@ -771,6 +774,252 @@ with pd.ExcelWriter(archivo_excel, engine="openpyxl") as escritor:
     )
 
 
+
+
+def generar_informe_word(
+    tabla: pd.DataFrame,
+    comparacion: pd.DataFrame,
+    documentos: list[dict],
+    alertas: list[str],
+) -> bytes:
+    documento_word = Document()
+
+    estilos = documento_word.styles
+
+    estilos["Normal"].font.name = "Arial"
+    estilos["Normal"].font.size = Pt(11)
+
+    titulo = documento_word.add_paragraph()
+    titulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    texto_titulo = titulo.add_run(
+        "INFORME PRELIMINAR DE ANÁLISIS JURÍDICO"
+    )
+    texto_titulo.bold = True
+    texto_titulo.font.size = Pt(15)
+
+    subtitulo = documento_word.add_paragraph()
+    subtitulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    subtitulo.add_run(
+        "Tutelas, desacatos y derechos de petición"
+    ).italic = True
+
+    documento_word.add_paragraph()
+
+    documento_word.add_heading(
+        "1. Advertencia sobre el alcance del informe",
+        level=1,
+    )
+
+    documento_word.add_paragraph(
+        "El presente documento fue generado mediante análisis automático "
+        "de patrones textuales. Es un apoyo preliminar y no reemplaza la "
+        "revisión integral del expediente, la asesoría jurídica ni la "
+        "valoración probatoria realizada por una persona competente."
+    )
+
+    documento_word.add_heading(
+        "2. Resumen general del expediente",
+        level=1,
+    )
+
+    resumen = documento_word.add_table(rows=4, cols=2)
+    resumen.style = "Table Grid"
+
+    resumen.cell(0, 0).text = "Documentos analizados"
+    resumen.cell(0, 1).text = str(len(tabla))
+
+    resumen.cell(1, 0).text = "Número total de páginas"
+    resumen.cell(1, 1).text = str(int(tabla["Páginas"].sum()))
+
+    resumen.cell(2, 0).text = "Documentos con fecha detectada"
+    resumen.cell(2, 1).text = str(
+        int(tabla["Fecha"].notna().sum())
+    )
+
+    resumen.cell(3, 0).text = "Documentos con alertas"
+    resumen.cell(3, 1).text = str(
+        int((tabla["Hallazgos"].str.len() > 0).sum())
+    )
+
+    documento_word.add_heading(
+        "3. Línea de tiempo procesal",
+        level=1,
+    )
+
+    columnas_tiempo = [
+        "Fecha",
+        "Documento",
+        "Tipo",
+        "Radicado",
+        "Páginas",
+    ]
+
+    tabla_word = documento_word.add_table(
+        rows=1,
+        cols=len(columnas_tiempo),
+    )
+    tabla_word.style = "Table Grid"
+
+    for indice, columna in enumerate(columnas_tiempo):
+        tabla_word.rows[0].cells[indice].text = columna
+
+    for _, fila in tabla.iterrows():
+        celdas = tabla_word.add_row().cells
+
+        for indice, columna in enumerate(columnas_tiempo):
+            valor = fila.get(columna, "")
+            celdas[indice].text = (
+                "" if pd.isna(valor) else str(valor)
+            )
+
+    documento_word.add_heading(
+        "4. Comparación preliminar",
+        level=1,
+    )
+
+    for _, fila in comparacion.iterrows():
+        parrafo = documento_word.add_paragraph()
+
+        etiqueta = parrafo.add_run(
+            f"{fila['Elemento']}: "
+        )
+        etiqueta.bold = True
+
+        parrafo.add_run(str(fila["Resultado"]))
+
+    documento_word.add_heading(
+        "5. Análisis individual de las piezas",
+        level=1,
+    )
+
+    for numero, pieza in enumerate(documentos, start=1):
+        documento_word.add_heading(
+            f"5.{numero}. {pieza['tipo']} — {pieza['nombre']}",
+            level=2,
+        )
+
+        documento_word.add_paragraph(
+            f"Fecha detectada: {pieza['fecha'] or 'No detectada'}"
+        )
+        documento_word.add_paragraph(
+            f"Radicado: {pieza['radicado'] or 'No detectado'}"
+        )
+        documento_word.add_paragraph(
+            "Derechos detectados: "
+            + (
+                ", ".join(pieza["derechos"])
+                if pieza["derechos"]
+                else "No detectados"
+            )
+        )
+
+        if pieza["pretensiones"]:
+            documento_word.add_heading(
+                "Pretensiones identificadas",
+                level=3,
+            )
+            documento_word.add_paragraph(
+                pieza["pretensiones"]
+            )
+
+        if pieza["ordenes"]:
+            documento_word.add_heading(
+                "Órdenes identificadas",
+                level=3,
+            )
+            documento_word.add_paragraph(
+                pieza["ordenes"]
+            )
+
+        if pieza["plazos"]:
+            documento_word.add_heading(
+                "Plazos detectados",
+                level=3,
+            )
+
+            for plazo in pieza["plazos"]:
+                documento_word.add_paragraph(
+                    plazo,
+                    style="List Bullet",
+                )
+
+        if pieza["hallazgos"]:
+            documento_word.add_heading(
+                "Alertas preliminares",
+                level=3,
+            )
+
+            for hallazgo in pieza["hallazgos"]:
+                documento_word.add_paragraph(
+                    hallazgo,
+                    style="List Bullet",
+                )
+
+        documento_word.add_heading(
+            "Resumen de la pieza",
+            level=3,
+        )
+        documento_word.add_paragraph(
+            pieza["resumen"]
+        )
+
+    documento_word.add_heading(
+        "6. Alertas generales",
+        level=1,
+    )
+
+    if alertas:
+        for alerta in alertas:
+            documento_word.add_paragraph(
+                alerta,
+                style="List Bullet",
+            )
+    else:
+        documento_word.add_paragraph(
+            "No se detectaron faltantes estructurales evidentes. "
+            "Esto no significa que el expediente esté completo."
+        )
+
+    documento_word.add_heading(
+        "7. Actuaciones que deben revisarse",
+        level=1,
+    )
+
+    recomendaciones = [
+        (
+            "Verificar que las fechas detectadas correspondan a la fecha "
+            "real de presentación, notificación o decisión."
+        ),
+        (
+            "Comparar cada pretensión de la tutela con la parte resolutiva "
+            "del fallo."
+        ),
+        (
+            "Comparar cada orden judicial con los documentos que acrediten "
+            "su cumplimiento material."
+        ),
+        (
+            "Revisar personalmente los términos procesales y las constancias "
+            "de notificación."
+        ),
+        (
+            "Confirmar que las respuestas sean de fondo, claras, precisas, "
+            "congruentes y oportunas."
+        ),
+    ]
+
+    for recomendacion in recomendaciones:
+        documento_word.add_paragraph(
+            recomendacion,
+            style="List Bullet",
+        )
+
+    salida = io.BytesIO()
+    documento_word.save(salida)
+
+    return salida.getvalue()
+
 st.download_button(
     "Descargar auditoría preliminar en Excel",
     data=archivo_excel.getvalue(),
@@ -781,7 +1030,27 @@ st.download_button(
     ),
 )
 
+
+
+informe_word = generar_informe_word(
+    tabla,
+    comparacion,
+    detalle_documentos,
+    alertas_generales,
+)
+
+st.download_button(
+    "Descargar informe jurídico en Word",
+    data=informe_word,
+    file_name="informe_preliminar_juridico.docx",
+    mime=(
+        "application/vnd.openxmlformats-officedocument."
+        "wordprocessingml.document"
+    ),
+)
+
 st.warning(
     "La aplicación identifica patrones de texto, pero todavía no realiza "
     "una valoración jurídica definitiva ni calcula términos con calendario judicial."
 )
+
