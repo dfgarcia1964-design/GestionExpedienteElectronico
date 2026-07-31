@@ -346,10 +346,14 @@ def detect_contradictions(
                 {
                     "Tema": ", ".join(shared),
                     "Versión 1 completa": left["fragment"],
+                    "Documento de la versión 1": left["document"],
+                    "Página de la versión 1": left["page"],
                     "Fuente 1": f"{left['document']}, página {left['page']}",
                     "Método 1": left["method"],
                     "Confianza OCR 1": left["ocr_confidence"],
                     "Versión 2 completa": right["fragment"],
+                    "Documento de la versión 2": right["document"],
+                    "Página de la versión 2": right["page"],
                     "Fuente 2": f"{right['document']}, página {right['page']}",
                     "Método 2": right["method"],
                     "Confianza OCR 2": right["ocr_confidence"],
@@ -494,3 +498,4 @@ def executive_summary(
         f"Se identificaron {len(contradictions)} contradicciones potenciales. "
         "Este resultado es preliminar y debe contrastarse con el expediente original."
     )
+

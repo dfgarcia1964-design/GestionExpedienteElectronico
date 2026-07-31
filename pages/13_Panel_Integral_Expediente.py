@@ -353,8 +353,12 @@ with tabs[3]:
                             row.get("Versión 1", ""),
                         )
                     )
-                    st.caption(
-                        row.get("Fuente 1", "")
+                    st.markdown(
+                        f"**Documento de la versión 1:** "
+                        f"{row.get('Documento de la versión 1', '')}"
+                    )
+                    st.markdown(
+                        f"**Página:** {row.get('Página de la versión 1', '')}"
                     )
 
                 with right:
@@ -365,8 +369,12 @@ with tabs[3]:
                             row.get("Versión 2", ""),
                         )
                     )
-                    st.caption(
-                        row.get("Fuente 2", "")
+                    st.markdown(
+                        f"**Documento de la versión 2:** "
+                        f"{row.get('Documento de la versión 2', '')}"
+                    )
+                    st.markdown(
+                        f"**Página:** {row.get('Página de la versión 2', '')}"
                     )
 
                 st.markdown("#### Explicación de la contradicción")
@@ -644,4 +652,5 @@ st.warning(
     "El panel integral genera alertas preliminares. Verifica siempre "
     "el documento original, la página, el contexto y los términos aplicables."
 )
+
 

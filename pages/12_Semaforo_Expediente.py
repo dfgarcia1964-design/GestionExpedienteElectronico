@@ -251,8 +251,14 @@ else:
             with left:
                 st.markdown("### Versión 1 completa")
                 st.write(row.get("Versión 1 completa", ""))
+                st.markdown(
+                    f"**Documento al que pertenece la versión 1:** "
+                    f"{row.get('Documento de la versión 1', '')}"
+                )
+                st.markdown(
+                    f"**Página:** {row.get('Página de la versión 1', '')}"
+                )
                 st.caption(
-                    f"Fuente: {row.get('Fuente 1', '')} | "
                     f"Método: {row.get('Método 1', '')} | "
                     f"OCR: {row.get('Confianza OCR 1', '')}"
                 )
@@ -260,8 +266,14 @@ else:
             with right:
                 st.markdown("### Versión 2 completa")
                 st.write(row.get("Versión 2 completa", ""))
+                st.markdown(
+                    f"**Documento al que pertenece la versión 2:** "
+                    f"{row.get('Documento de la versión 2', '')}"
+                )
+                st.markdown(
+                    f"**Página:** {row.get('Página de la versión 2', '')}"
+                )
                 st.caption(
-                    f"Fuente: {row.get('Fuente 2', '')} | "
                     f"Método: {row.get('Método 2', '')} | "
                     f"OCR: {row.get('Confianza OCR 2', '')}"
                 )
@@ -401,4 +413,5 @@ st.warning(
     "Una contradicción automática es una señal de revisión, no una conclusión jurídica. "
     "Debe verificarse el contexto completo de ambas fuentes."
 )
+
 
