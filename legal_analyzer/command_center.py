@@ -62,16 +62,10 @@ class RiskResult:
 
 
 def flatten_pages(documents: dict[str, list[PageTrace]]) -> list[PageTrace]:
-    return [
-        page
-        for pages in documents.values()
-        for page in pages
-    ]
+    return [page for pages in documents.values() for page in pages]
 
 
-def document_inventory(
-    documents: dict[str, list[PageTrace]],
-) -> Counter:
+def document_inventory(documents: dict[str, list[PageTrace]]) -> Counter:
     return Counter(
         classify_document(pages)[0]
         for pages in documents.values()
@@ -81,11 +75,15 @@ def document_inventory(
 def detect_contradictions(
     documents: dict[str, list[PageTrace]],
 ) -> list[dict]:
+    """
+    Detecta contradicciones potenciales y conserva el texto completo
+    de ambas versiones, sin recortes.
+    """
     statements: list[dict] = []
 
     for name, pages in documents.items():
         for page in pages:
-            for fragment in split_fragments(page.text):
+            for fragment in split_fragments(page.text, min_length=20):
                 normalized = normalize(fragment)
 
                 polarity = ""
@@ -110,18 +108,23 @@ def detect_contradictions(
                     {
                         "document": name,
                         "page": page.page,
-                        "fragment": fragment[:900],
+                        "fragment": fragment.strip(),
                         "polarity": polarity,
                         "topics": topics,
+                        "method": page.extraction_method,
+                        "ocr_confidence": page.ocr_confidence,
                     }
                 )
 
     contradictions: list[dict] = []
-    seen: set[tuple[str, str, int, str, int]] = set()
+    seen: set[tuple] = set()
 
     for index, left in enumerate(statements):
         for right in statements[index + 1:]:
-            if left["document"] == right["document"]:
+            if (
+                left["document"] == right["document"]
+                and left["page"] == right["page"]
+            ):
                 continue
 
             shared = sorted(
@@ -136,13 +139,23 @@ def detect_contradictions(
 
             key = (
                 left["document"],
-                right["document"],
                 left["page"],
+                left["fragment"],
                 right["document"],
                 right["page"],
+                right["fragment"],
             )
 
-            if key in seen:
+            reverse_key = (
+                right["document"],
+                right["page"],
+                right["fragment"],
+                left["document"],
+                left["page"],
+                left["fragment"],
+            )
+
+            if key in seen or reverse_key in seen:
                 continue
 
             seen.add(key)
@@ -150,19 +163,27 @@ def detect_contradictions(
             contradictions.append(
                 {
                     "Tema": ", ".join(shared),
-                    "Versión 1": left["fragment"],
-                    "Fuente 1": (
-                        f"{left['document']}, página {left['page']}"
+                    "Versión 1 completa": left["fragment"],
+                    "Fuente 1": f"{left['document']}, página {left['page']}",
+                    "Método 1": left["method"],
+                    "Confianza OCR 1": left["ocr_confidence"],
+                    "Versión 2 completa": right["fragment"],
+                    "Fuente 2": f"{right['document']}, página {right['page']}",
+                    "Método 2": right["method"],
+                    "Confianza OCR 2": right["ocr_confidence"],
+                    "Tipo de oposición": (
+                        f"{left['polarity']} ↔ {right['polarity']}"
                     ),
-                    "Versión 2": right["fragment"],
-                    "Fuente 2": (
-                        f"{right['document']}, página {right['page']}"
+                    "Evaluación": (
+                        "Contradicción potencial; debe compararse el contexto "
+                        "completo de ambas fuentes."
                     ),
-                    "Evaluación": "Contradicción potencial; revisión humana obligatoria",
+                    "Conclusión revisada": "",
+                    "Observaciones": "",
                 }
             )
 
-    return contradictions[:30]
+    return contradictions
 
 
 def assess_risk(
@@ -255,7 +276,7 @@ def assess_risk(
             f"Se detectaron {len(contradictions)} contradicción(es) potencial(es)."
         )
         actions.append(
-            "Solicitar soportes y aclaraciones sobre las versiones contradictorias."
+            "Revisar el texto completo de cada versión y verificar cuál está respaldada."
         )
 
     score = min(100, score)
