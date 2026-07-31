@@ -1,5 +1,6 @@
 ﻿import io
 import re
+import unicodedata
 from datetime import datetime
 from typing import Optional
 
@@ -16,78 +17,144 @@ st.set_page_config(
 
 st.title("⚖️ Analizador jurídico de expedientes")
 st.caption(
-    "Primera versión: extrae texto, clasifica documentos y genera "
-    "una línea de tiempo preliminar."
+    "Analiza tutelas, desacatos y derechos de petición. "
+    "Los resultados deben ser revisados por una persona."
 )
+
 
 TIPOS_DOCUMENTO = {
     "Derecho de petición": [
-        "derecho de petición",
+        "derecho de peticion",
         "ley 1755",
-        "petición respetuosa",
+        "articulo 23 de la constitucion",
+        "peticion respetuosa",
     ],
     "Acción de tutela": [
-        "acción de tutela",
+        "accion de tutela",
         "solicitud de amparo",
         "derechos fundamentales",
+        "decreto 2591",
     ],
     "Auto admisorio": [
         "auto admisorio",
-        "admite la acción de tutela",
-        "admitir la presente acción",
+        "admite la accion de tutela",
+        "admitir la presente accion",
+        "correr traslado",
     ],
     "Contestación": [
-        "contestación",
-        "respuesta a la acción de tutela",
+        "contestacion",
+        "respuesta a la accion de tutela",
         "informe rendido",
+        "pronunciamiento de la entidad",
     ],
     "Fallo de tutela": [
         "fallo de tutela",
+        "administrando justicia",
         "resuelve",
-        "amparar",
+        "amparar los derechos",
         "negar el amparo",
     ],
     "Impugnación": [
-        "impugnación",
+        "impugnacion",
         "impugnar el fallo",
+        "segunda instancia",
     ],
     "Incidente de desacato": [
         "incidente de desacato",
-        "desacato",
+        "solicitud de desacato",
         "incumplimiento del fallo",
     ],
     "Auto de requerimiento": [
-        "requerir",
         "auto de requerimiento",
-        "requiérase",
+        "requierase",
+        "requerir a",
+        "previo a iniciar incidente",
+    ],
+    "Respuesta de cumplimiento": [
+        "informe de cumplimiento",
+        "cumplimiento del fallo",
+        "se dio cumplimiento",
+        "acreditamos cumplimiento",
     ],
     "Notificación": [
-        "notificación",
-        "constancia de envío",
-        "correo electrónico",
+        "constancia de notificacion",
+        "notificacion electronica",
+        "constancia de envio",
+        "correo electronico",
     ],
 }
 
 
-def extraer_texto_pdf(contenido: bytes) -> tuple[str, int]:
+DERECHOS = {
+    "Derecho de petición": [
+        "derecho fundamental de peticion",
+        "derecho de peticion",
+    ],
+    "Debido proceso": [
+        "debido proceso",
+    ],
+    "Salud": [
+        "derecho fundamental a la salud",
+        "derecho a la salud",
+    ],
+    "Vida digna": [
+        "vida digna",
+        "dignidad humana",
+    ],
+    "Igualdad": [
+        "derecho a la igualdad",
+    ],
+    "Mínimo vital": [
+        "minimo vital",
+    ],
+    "Acceso a la justicia": [
+        "acceso a la administracion de justicia",
+        "acceso a la justicia",
+    ],
+    "Seguridad social": [
+        "seguridad social",
+    ],
+}
+
+
+def normalizar(texto: str) -> str:
+    texto = texto or ""
+    texto = unicodedata.normalize("NFD", texto)
+    texto = "".join(
+        caracter for caracter in texto
+        if unicodedata.category(caracter) != "Mn"
+    )
+    texto = texto.lower()
+    return re.sub(r"\s+", " ", texto).strip()
+
+
+def limpiar_texto(texto: str) -> str:
+    texto = texto.replace("\x00", " ")
+    texto = re.sub(r"[ \t]+", " ", texto)
+    texto = re.sub(r"\n{3,}", "\n\n", texto)
+    return texto.strip()
+
+
+def extraer_texto_pdf(contenido: bytes) -> tuple[str, list[str]]:
     lector = PdfReader(io.BytesIO(contenido))
     paginas = []
 
-    for pagina in lector.pages:
-        paginas.append(pagina.extract_text() or "")
+    for numero, pagina in enumerate(lector.pages, start=1):
+        texto = pagina.extract_text() or ""
+        paginas.append(limpiar_texto(texto))
 
-    return "\n".join(paginas), len(lector.pages)
+    return "\n\n".join(paginas), paginas
 
 
 def clasificar_documento(texto: str) -> tuple[str, int]:
-    texto_normalizado = texto.lower()
+    texto_normalizado = normalizar(texto)
     mejor_tipo = "Documento no clasificado"
     mejor_puntaje = 0
 
-    for tipo, palabras in TIPOS_DOCUMENTO.items():
+    for tipo, expresiones in TIPOS_DOCUMENTO.items():
         puntaje = sum(
-            1 for palabra in palabras
-            if palabra in texto_normalizado
+            1 for expresion in expresiones
+            if expresion in texto_normalizado
         )
 
         if puntaje > mejor_puntaje:
@@ -98,179 +165,623 @@ def clasificar_documento(texto: str) -> tuple[str, int]:
 
 
 def buscar_fecha(texto: str) -> Optional[str]:
-    patrones = [
-        r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b",
-        (
-            r"\b(\d{1,2})\s+de\s+"
-            r"(enero|febrero|marzo|abril|mayo|junio|julio|agosto|"
-            r"septiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4})"
-        ),
-    ]
+    texto_normalizado = normalizar(texto)
 
-    coincidencia = re.search(patrones[0], texto, re.IGNORECASE)
+    patron_numerico = (
+        r"\b([0-3]?\d)[/-]([01]?\d)[/-]((?:19|20)\d{2})\b"
+    )
+
+    coincidencia = re.search(patron_numerico, texto_normalizado)
 
     if coincidencia:
         dia, mes, anio = coincidencia.groups()
 
         try:
-            fecha = datetime(int(anio), int(mes), int(dia))
-            return fecha.strftime("%Y-%m-%d")
+            return datetime(
+                int(anio),
+                int(mes),
+                int(dia),
+            ).strftime("%Y-%m-%d")
         except ValueError:
             pass
 
-    coincidencia = re.search(patrones[1], texto, re.IGNORECASE)
+    meses = {
+        "enero": 1,
+        "febrero": 2,
+        "marzo": 3,
+        "abril": 4,
+        "mayo": 5,
+        "junio": 6,
+        "julio": 7,
+        "agosto": 8,
+        "septiembre": 9,
+        "octubre": 10,
+        "noviembre": 11,
+        "diciembre": 12,
+    }
+
+    patron_textual = (
+        r"\b([0-3]?\d)\s+de\s+("
+        + "|".join(meses.keys())
+        + r")\s+de\s+((?:19|20)\d{2})\b"
+    )
+
+    coincidencia = re.search(patron_textual, texto_normalizado)
 
     if coincidencia:
-        meses = {
-            "enero": 1,
-            "febrero": 2,
-            "marzo": 3,
-            "abril": 4,
-            "mayo": 5,
-            "junio": 6,
-            "julio": 7,
-            "agosto": 8,
-            "septiembre": 9,
-            "octubre": 10,
-            "noviembre": 11,
-            "diciembre": 12,
-        }
-
         dia, mes_texto, anio = coincidencia.groups()
 
         try:
-            fecha = datetime(
+            return datetime(
                 int(anio),
-                meses[mes_texto.lower()],
+                meses[mes_texto],
                 int(dia),
-            )
-            return fecha.strftime("%Y-%m-%d")
+            ).strftime("%Y-%m-%d")
         except ValueError:
             pass
 
     return None
 
 
-def crear_resumen(texto: str, limite: int = 700) -> str:
+def buscar_radicado(texto: str) -> Optional[str]:
+    patrones = [
+        r"\b\d{2}[-\s]\d{3}[-\s]\d{2}[-\s]\d{2}[-\s]\d{3}[-\s]\d{4}[-\s]\d{5}[-\s]\d{2}\b",
+        r"\b\d{23}\b",
+        r"radicaci[oó]n\s*[:#]?\s*([0-9\-\s]{15,35})",
+        r"radicado\s*[:#]?\s*([0-9\-\s]{10,35})",
+    ]
+
+    for patron in patrones:
+        coincidencia = re.search(
+            patron,
+            texto,
+            flags=re.IGNORECASE,
+        )
+
+        if coincidencia:
+            valor = (
+                coincidencia.group(1)
+                if coincidencia.lastindex
+                else coincidencia.group(0)
+            )
+            return re.sub(r"\s+", "", valor).strip(":- ")
+
+    return None
+
+
+def detectar_derechos(texto: str) -> list[str]:
+    texto_normalizado = normalizar(texto)
+    encontrados = []
+
+    for derecho, expresiones in DERECHOS.items():
+        if any(
+            expresion in texto_normalizado
+            for expresion in expresiones
+        ):
+            encontrados.append(derecho)
+
+    return encontrados
+
+
+def extraer_bloque(
+    texto: str,
+    encabezados_inicio: list[str],
+    encabezados_fin: list[str],
+    limite: int = 5000,
+) -> str:
+    texto_normalizado = normalizar(texto)
+    inicio = -1
+
+    for encabezado in encabezados_inicio:
+        posicion = texto_normalizado.find(normalizar(encabezado))
+
+        if posicion >= 0:
+            inicio = posicion + len(normalizar(encabezado))
+            break
+
+    if inicio < 0:
+        return ""
+
+    fin = min(len(texto_normalizado), inicio + limite)
+
+    for encabezado in encabezados_fin:
+        posicion = texto_normalizado.find(
+            normalizar(encabezado),
+            inicio,
+        )
+
+        if posicion >= 0:
+            fin = min(fin, posicion)
+
+    return texto_normalizado[inicio:fin].strip(" :.-\n")
+
+
+def extraer_pretensiones(texto: str) -> str:
+    return extraer_bloque(
+        texto,
+        [
+            "pretensiones",
+            "peticiones",
+            "solicitudes",
+            "solicito al despacho",
+        ],
+        [
+            "fundamentos de derecho",
+            "pruebas",
+            "anexos",
+            "juramento",
+            "competencia",
+            "notificaciones",
+        ],
+    )
+
+
+def extraer_ordenes(texto: str) -> str:
+    bloque = extraer_bloque(
+        texto,
+        [
+            "resuelve",
+            "parte resolutiva",
+            "en merito de lo expuesto",
+        ],
+        [
+            "notifiquese",
+            "comuniquese",
+            "cumplase",
+            "firma",
+        ],
+        limite=7000,
+    )
+
+    if bloque:
+        return bloque
+
+    texto_normalizado = normalizar(texto)
+    frases = re.findall(
+        r"(?:ordenar|ordenese|requerir|requierase|amparar|"
+        r"negar|conceder)[^.]{20,500}\.",
+        texto_normalizado,
+    )
+
+    return " ".join(frases[:10])
+
+
+def extraer_plazos(texto: str) -> list[str]:
+    texto_normalizado = normalizar(texto)
+
+    patrones = [
+        r"\b(?:dentro de|en el termino de|plazo de)\s+"
+        r"(?:las\s+)?\d+\s+horas\b",
+        r"\b(?:dentro de|en el termino de|plazo de)\s+"
+        r"(?:los\s+)?\d+\s+dias(?:\s+habiles)?\b",
+        r"\btermino improrrogable de\s+\d+\s+"
+        r"(?:horas|dias(?:\s+habiles)?)\b",
+        r"\ben un plazo no superior a\s+\d+\s+"
+        r"(?:horas|dias(?:\s+habiles)?)\b",
+    ]
+
+    resultados = []
+
+    for patron in patrones:
+        resultados.extend(
+            re.findall(patron, texto_normalizado)
+        )
+
+    return list(dict.fromkeys(resultados))
+
+
+def localizar_paginas(
+    paginas: list[str],
+    expresiones: list[str],
+) -> list[int]:
+    encontradas = []
+
+    for numero, pagina in enumerate(paginas, start=1):
+        pagina_normalizada = normalizar(pagina)
+
+        if any(
+            normalizar(expresion) in pagina_normalizada
+            for expresion in expresiones
+        ):
+            encontradas.append(numero)
+
+    return encontradas
+
+
+def crear_resumen(texto: str, limite: int = 900) -> str:
     texto_limpio = re.sub(r"\s+", " ", texto).strip()
 
     if not texto_limpio:
-        return "No fue posible extraer texto."
+        return "No fue posible extraer texto digital."
 
     return texto_limpio[:limite] + (
         "..." if len(texto_limpio) > limite else ""
     )
 
 
+def evaluar_documento(
+    tipo: str,
+    texto: str,
+    pretensiones: str,
+    ordenes: str,
+    plazos: list[str],
+) -> list[str]:
+    hallazgos = []
+    texto_normalizado = normalizar(texto)
+
+    if tipo == "Derecho de petición":
+        if "respuesta" not in texto_normalizado:
+            hallazgos.append(
+                "Debe comprobarse la fecha de radicación y la respuesta recibida."
+            )
+
+    if tipo == "Acción de tutela" and not pretensiones:
+        hallazgos.append(
+            "No se identificó claramente el capítulo de pretensiones."
+        )
+
+    if tipo == "Fallo de tutela":
+        if not ordenes:
+            hallazgos.append(
+                "No se logró identificar la parte resolutiva del fallo."
+            )
+
+        if plazos:
+            hallazgos.append(
+                "El fallo contiene uno o más plazos que deben verificarse."
+            )
+
+    if tipo == "Contestación":
+        expresiones_evasivas = [
+            "falta de legitimacion",
+            "hecho superado",
+            "carencia actual de objeto",
+            "no nos consta",
+            "no es de nuestra competencia",
+        ]
+
+        detectadas = [
+            expresion for expresion in expresiones_evasivas
+            if expresion in texto_normalizado
+        ]
+
+        if detectadas:
+            hallazgos.append(
+                "La contestación utiliza argumentos que deben contrastarse: "
+                + ", ".join(detectadas)
+                + "."
+            )
+
+    if tipo in {
+        "Incidente de desacato",
+        "Respuesta de cumplimiento",
+    }:
+        hallazgos.append(
+            "Debe compararse esta pieza con cada orden concreta del fallo."
+        )
+
+    if len(texto.strip()) < 100:
+        hallazgos.append(
+            "El PDF parece escaneado o contiene muy poco texto; podría requerir OCR."
+        )
+
+    return hallazgos
+
+
 archivos = st.file_uploader(
-    "Sube las piezas procesales en formato PDF",
+    "Sube todas las piezas procesales del mismo expediente",
     type=["pdf"],
     accept_multiple_files=True,
 )
 
-if archivos:
-    resultados = []
-
-    barra = st.progress(0)
-
-    for indice, archivo in enumerate(archivos):
-        try:
-            contenido = archivo.getvalue()
-            texto, paginas = extraer_texto_pdf(contenido)
-            tipo, puntaje = clasificar_documento(texto)
-            fecha = buscar_fecha(texto)
-
-            resultados.append(
-                {
-                    "Fecha detectada": fecha,
-                    "Documento": archivo.name,
-                    "Tipo procesal": tipo,
-                    "Confianza básica": puntaje,
-                    "Páginas": paginas,
-                    "Texto extraído": len(texto),
-                    "Resumen preliminar": crear_resumen(texto),
-                }
-            )
-
-        except Exception as error:
-            resultados.append(
-                {
-                    "Fecha detectada": None,
-                    "Documento": archivo.name,
-                    "Tipo procesal": "Error de lectura",
-                    "Confianza básica": 0,
-                    "Páginas": 0,
-                    "Texto extraído": 0,
-                    "Resumen preliminar": str(error),
-                }
-            )
-
-        barra.progress((indice + 1) / len(archivos))
-
-    tabla = pd.DataFrame(resultados)
-
-    tabla["_orden"] = pd.to_datetime(
-        tabla["Fecha detectada"],
-        errors="coerce",
+if not archivos:
+    st.info(
+        "Carga los PDF del proceso: petición, tutela, auto admisorio, "
+        "contestaciones, fallo, desacato, requerimientos y respuestas."
     )
+    st.stop()
 
-    tabla = tabla.sort_values(
-        by=["_orden", "Documento"],
-        na_position="last",
-    ).drop(columns=["_orden"])
 
-    st.success(f"Se procesaron {len(tabla)} documentos.")
+resultados = []
+detalle_documentos = []
+barra = st.progress(0)
 
-    st.subheader("Línea de tiempo preliminar")
+for indice, archivo in enumerate(archivos):
+    try:
+        contenido = archivo.getvalue()
+        texto, paginas = extraer_texto_pdf(contenido)
 
-    st.dataframe(
-        tabla[
-            [
-                "Fecha detectada",
-                "Documento",
-                "Tipo procesal",
-                "Confianza básica",
-                "Páginas",
-            ]
-        ],
-        use_container_width=True,
-        hide_index=True,
-    )
+        tipo, confianza = clasificar_documento(texto)
+        fecha = buscar_fecha(texto)
+        radicado = buscar_radicado(texto)
+        derechos = detectar_derechos(texto)
+        pretensiones = extraer_pretensiones(texto)
+        ordenes = extraer_ordenes(texto)
+        plazos = extraer_plazos(texto)
 
-    st.subheader("Resumen de las piezas")
-
-    for _, fila in tabla.iterrows():
-        with st.expander(
-            f"{fila['Tipo procesal']} — {fila['Documento']}"
-        ):
-            st.write(f"**Fecha detectada:** {fila['Fecha detectada'] or 'No detectada'}")
-            st.write(f"**Número de páginas:** {fila['Páginas']}")
-            st.write(f"**Resumen preliminar:** {fila['Resumen preliminar']}")
-
-    archivo_excel = io.BytesIO()
-
-    with pd.ExcelWriter(archivo_excel, engine="openpyxl") as escritor:
-        tabla.to_excel(
-            escritor,
-            sheet_name="Analisis preliminar",
-            index=False,
+        paginas_resuelve = localizar_paginas(
+            paginas,
+            ["resuelve", "ordenar", "ordenese"],
         )
 
-    st.download_button(
-        "Descargar análisis preliminar en Excel",
-        data=archivo_excel.getvalue(),
-        file_name="analisis_preliminar_expediente.xlsx",
-        mime=(
-            "application/vnd.openxmlformats-officedocument."
-            "spreadsheetml.sheet"
-        ),
+        hallazgos = evaluar_documento(
+            tipo,
+            texto,
+            pretensiones,
+            ordenes,
+            plazos,
+        )
+
+        resultados.append(
+            {
+                "Fecha": fecha,
+                "Documento": archivo.name,
+                "Tipo": tipo,
+                "Radicado": radicado,
+                "Derechos detectados": ", ".join(derechos),
+                "Plazos": ", ".join(plazos),
+                "Páginas": len(paginas),
+                "Confianza": confianza,
+                "Hallazgos": " | ".join(hallazgos),
+            }
+        )
+
+        detalle_documentos.append(
+            {
+                "nombre": archivo.name,
+                "tipo": tipo,
+                "fecha": fecha,
+                "radicado": radicado,
+                "derechos": derechos,
+                "paginas": len(paginas),
+                "paginas_resuelve": paginas_resuelve,
+                "pretensiones": pretensiones,
+                "ordenes": ordenes,
+                "plazos": plazos,
+                "hallazgos": hallazgos,
+                "resumen": crear_resumen(texto),
+                "texto": texto,
+            }
+        )
+
+    except Exception as error:
+        resultados.append(
+            {
+                "Fecha": None,
+                "Documento": archivo.name,
+                "Tipo": "Error de lectura",
+                "Radicado": None,
+                "Derechos detectados": "",
+                "Plazos": "",
+                "Páginas": 0,
+                "Confianza": 0,
+                "Hallazgos": str(error),
+            }
+        )
+
+    barra.progress((indice + 1) / len(archivos))
+
+
+tabla = pd.DataFrame(resultados)
+tabla["_orden"] = pd.to_datetime(tabla["Fecha"], errors="coerce")
+tabla = tabla.sort_values(
+    ["_orden", "Documento"],
+    na_position="last",
+).drop(columns="_orden")
+
+
+st.success(f"Se analizaron {len(tabla)} piezas procesales.")
+
+columna1, columna2, columna3, columna4 = st.columns(4)
+
+columna1.metric("Documentos", len(tabla))
+columna2.metric(
+    "Páginas",
+    int(tabla["Páginas"].sum()),
+)
+columna3.metric(
+    "Con fecha detectada",
+    int(tabla["Fecha"].notna().sum()),
+)
+columna4.metric(
+    "Con alertas",
+    int((tabla["Hallazgos"].str.len() > 0).sum()),
+)
+
+
+st.subheader("1. Línea de tiempo procesal")
+
+st.dataframe(
+    tabla[
+        [
+            "Fecha",
+            "Documento",
+            "Tipo",
+            "Radicado",
+            "Páginas",
+            "Hallazgos",
+        ]
+    ],
+    use_container_width=True,
+    hide_index=True,
+)
+
+
+st.subheader("2. Comparación preliminar")
+
+documentos_tutela = [
+    documento for documento in detalle_documentos
+    if documento["tipo"] == "Acción de tutela"
+]
+
+documentos_fallo = [
+    documento for documento in detalle_documentos
+    if documento["tipo"] == "Fallo de tutela"
+]
+
+documentos_cumplimiento = [
+    documento for documento in detalle_documentos
+    if documento["tipo"] in {
+        "Respuesta de cumplimiento",
+        "Contestación",
+        "Incidente de desacato",
+    }
+]
+
+comparacion = pd.DataFrame(
+    [
+        {
+            "Elemento": "Lo solicitado",
+            "Resultado": (
+                documentos_tutela[0]["pretensiones"]
+                if documentos_tutela
+                else "No se identificó una acción de tutela."
+            ),
+        },
+        {
+            "Elemento": "Lo ordenado",
+            "Resultado": (
+                documentos_fallo[0]["ordenes"]
+                if documentos_fallo
+                else "No se identificó un fallo de tutela."
+            ),
+        },
+        {
+            "Elemento": "Plazos judiciales",
+            "Resultado": (
+                ", ".join(documentos_fallo[0]["plazos"])
+                if documentos_fallo
+                and documentos_fallo[0]["plazos"]
+                else "No se detectaron plazos automáticamente."
+            ),
+        },
+        {
+            "Elemento": "Piezas de cumplimiento",
+            "Resultado": (
+                ", ".join(
+                    documento["nombre"]
+                    for documento in documentos_cumplimiento
+                )
+                if documentos_cumplimiento
+                else "No se identificaron respuestas o piezas de cumplimiento."
+            ),
+        },
+    ]
+)
+
+st.dataframe(
+    comparacion,
+    use_container_width=True,
+    hide_index=True,
+)
+
+
+st.subheader("3. Análisis individual")
+
+for documento in detalle_documentos:
+    titulo = (
+        f"{documento['tipo']} — {documento['nombre']}"
     )
 
-    st.warning(
-        "Este resultado es preliminar. No reemplaza la revisión jurídica "
-        "ni confirma por sí solo el cumplimiento de términos u órdenes."
+    with st.expander(titulo):
+        st.write(
+            f"**Fecha detectada:** "
+            f"{documento['fecha'] or 'No detectada'}"
+        )
+        st.write(
+            f"**Radicado:** "
+            f"{documento['radicado'] or 'No detectado'}"
+        )
+        st.write(
+            f"**Derechos:** "
+            f"{', '.join(documento['derechos']) or 'No detectados'}"
+        )
+        st.write(
+            f"**Páginas con posibles órdenes:** "
+            f"{documento['paginas_resuelve'] or 'No localizadas'}"
+        )
+
+        if documento["pretensiones"]:
+            st.markdown("#### Pretensiones identificadas")
+            st.write(documento["pretensiones"])
+
+        if documento["ordenes"]:
+            st.markdown("#### Órdenes identificadas")
+            st.write(documento["ordenes"])
+
+        if documento["plazos"]:
+            st.markdown("#### Plazos encontrados")
+            for plazo in documento["plazos"]:
+                st.write(f"- {plazo}")
+
+        if documento["hallazgos"]:
+            st.markdown("#### Alertas preliminares")
+            for hallazgo in documento["hallazgos"]:
+                st.warning(hallazgo)
+
+        st.markdown("#### Resumen")
+        st.write(documento["resumen"])
+
+
+st.subheader("4. Alertas generales")
+
+alertas_generales = []
+
+tipos_presentes = set(tabla["Tipo"].tolist())
+
+if "Acción de tutela" in tipos_presentes and "Fallo de tutela" not in tipos_presentes:
+    alertas_generales.append(
+        "Se encontró una tutela, pero no se identificó el fallo."
+    )
+
+if "Fallo de tutela" in tipos_presentes and not documentos_cumplimiento:
+    alertas_generales.append(
+        "Existe un fallo, pero no se identificaron piezas posteriores "
+        "que permitan revisar su cumplimiento."
+    )
+
+if "Incidente de desacato" in tipos_presentes and "Fallo de tutela" not in tipos_presentes:
+    alertas_generales.append(
+        "Se encontró un desacato sin el fallo que contiene las órdenes originales."
+    )
+
+if not alertas_generales:
+    st.success(
+        "No se detectaron faltantes estructurales evidentes. "
+        "Esto no confirma que el expediente esté completo."
     )
 else:
-    st.info(
-        "Carga varios PDF del mismo proceso para construir la línea de tiempo."
+    for alerta in alertas_generales:
+        st.warning(alerta)
+
+
+archivo_excel = io.BytesIO()
+
+with pd.ExcelWriter(archivo_excel, engine="openpyxl") as escritor:
+    tabla.to_excel(
+        escritor,
+        sheet_name="Linea de tiempo",
+        index=False,
     )
+
+    comparacion.to_excel(
+        escritor,
+        sheet_name="Comparacion",
+        index=False,
+    )
+
+
+st.download_button(
+    "Descargar auditoría preliminar en Excel",
+    data=archivo_excel.getvalue(),
+    file_name="auditoria_preliminar_expediente.xlsx",
+    mime=(
+        "application/vnd.openxmlformats-officedocument."
+        "spreadsheetml.sheet"
+    ),
+)
+
+st.warning(
+    "La aplicación identifica patrones de texto, pero todavía no realiza "
+    "una valoración jurídica definitiva ni calcula términos con calendario judicial."
+)
