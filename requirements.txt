@@ -11,3 +11,4 @@ xlwings
 openai
 plotly
 pytz
+python-docx
