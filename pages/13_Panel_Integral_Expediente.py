@@ -369,9 +369,20 @@ with tabs[3]:
                         row.get("Fuente 2", "")
                     )
 
-                st.info(
-                    row.get("Evaluación", "")
-                )
+                st.markdown("#### Explicación de la contradicción")
+                st.write(row.get("Qué se contradice", ""))
+
+                st.markdown("#### Por qué importa")
+                st.write(row.get("Por qué importa", ""))
+
+                st.markdown("#### Todo lo que debes revisar")
+                st.warning(row.get("Todo lo que debe revisarse", ""))
+
+                st.markdown("#### Prueba que puede faltar")
+                st.write(row.get("Prueba que puede faltar", ""))
+
+                st.markdown("#### Conclusión preliminar")
+                st.info(row.get("Conclusión preliminar", ""))
 
         contradictions = st.data_editor(
             contradictions,
@@ -633,3 +644,4 @@ st.warning(
     "El panel integral genera alertas preliminares. Verifica siempre "
     "el documento original, la página, el contexto y los términos aplicables."
 )
+

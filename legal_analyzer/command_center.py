@@ -52,6 +52,162 @@ IMPORTANT_TERMS = (
     "notificacion",
 )
 
+REVIEW_GUIDE = {
+    "entrega": {
+        "importance": (
+            "La entrega material no puede darse por demostrada únicamente con una afirmación."
+        ),
+        "review": (
+            "Acta firmada, fecha, persona que recibió, identificación del bien, "
+            "modelo, cantidad, estado y constancia de recibido."
+        ),
+        "missing": (
+            "Acta de entrega o soporte equivalente que permita verificar quién recibió, "
+            "qué recibió y cuándo."
+        ),
+    },
+    "autorizacion": {
+        "importance": (
+            "Una autorización no demuestra por sí sola que el servicio se haya prestado."
+        ),
+        "review": (
+            "Número de autorización, vigencia, prestador asignado, servicio exacto, "
+            "fecha de expedición y prueba de ejecución."
+        ),
+        "missing": (
+            "Autorización completa y soporte de que el servicio autorizado fue efectivamente prestado."
+        ),
+    },
+    "audifono": {
+        "importance": (
+            "Puede existir diferencia entre el dispositivo prescrito, autorizado y entregado."
+        ),
+        "review": (
+            "Marca, modelo, referencia, características, serial, fórmula médica, "
+            "concepto del médico tratante y acta de entrega."
+        ),
+        "missing": (
+            "Prueba técnica que permita comparar el audífono prescrito con el realmente entregado."
+        ),
+    },
+    "medicamento": {
+        "importance": (
+            "La autorización o despacho parcial no equivale necesariamente al suministro completo."
+        ),
+        "review": (
+            "Nombre, dosis, cantidad, periodicidad, fechas de entrega, fórmula vigente "
+            "y continuidad del tratamiento."
+        ),
+        "missing": (
+            "Soporte completo del suministro conforme a la prescripción médica."
+        ),
+    },
+    "respuesta": {
+        "importance": (
+            "Una respuesta puede existir formalmente y aun así ser incompleta, evasiva o incongruente."
+        ),
+        "review": (
+            "Cada solicitud formulada, respuesta concreta, documentos anexos, fecha de envío, "
+            "fecha de recepción y competencia de quien respondió."
+        ),
+        "missing": (
+            "Respuesta expresa, completa y verificable frente a cada punto solicitado."
+        ),
+    },
+    "tratamiento": {
+        "importance": (
+            "El cumplimiento debe revisarse de manera integral y no solo frente a una actuación aislada."
+        ),
+        "review": (
+            "Continuidad, oportunidad, órdenes médicas, citas, autorizaciones, entregas, "
+            "controles y barreras de acceso."
+        ),
+        "missing": (
+            "Soportes que acrediten continuidad e integralidad del tratamiento."
+        ),
+    },
+    "valoracion": {
+        "importance": (
+            "La sola programación de una valoración no demuestra que haya sido realizada."
+        ),
+        "review": (
+            "Fecha programada, asistencia, profesional tratante, resultado, recomendaciones "
+            "y órdenes derivadas."
+        ),
+        "missing": (
+            "Historia o concepto que acredite la realización efectiva de la valoración."
+        ),
+    },
+    "cita": {
+        "importance": (
+            "Asignar una cita no equivale a prestar efectivamente el servicio."
+        ),
+        "review": (
+            "Fecha, hora, prestador, asistencia, cancelaciones, reprogramaciones y resultado."
+        ),
+        "missing": (
+            "Constancia de atención o historia clínica de la cita efectivamente realizada."
+        ),
+    },
+    "pago": {
+        "importance": (
+            "El anuncio de pago no demuestra que los recursos hayan sido recibidos."
+        ),
+        "review": (
+            "Comprobante bancario, fecha, valor, beneficiario, referencia y concepto del pago."
+        ),
+        "missing": (
+            "Soporte financiero verificable del pago o transferencia."
+        ),
+    },
+    "reintegro": {
+        "importance": (
+            "La aprobación del reintegro no acredita que el dinero haya sido desembolsado."
+        ),
+        "review": (
+            "Valor aprobado, fecha de giro, cuenta receptora, comprobante y fecha de disponibilidad."
+        ),
+        "missing": (
+            "Comprobante de desembolso y recepción efectiva del reintegro."
+        ),
+    },
+    "expediente": {
+        "importance": (
+            "La remisión incompleta del expediente puede impedir el ejercicio de defensa y seguimiento."
+        ),
+        "review": (
+            "Índice, memoriales, anexos, correos, constancias, autos, notificaciones "
+            "y documentos mencionados pero ausentes."
+        ),
+        "missing": (
+            "Copia íntegra y organizada del expediente electrónico."
+        ),
+    },
+    "concepto medico": {
+        "importance": (
+            "Debe verificarse que el concepto provenga del profesional competente y se base en valoración suficiente."
+        ),
+        "review": (
+            "Identidad del médico, especialidad, adscripción, fecha, examen del paciente, "
+            "fundamento clínico y relación con la orden judicial."
+        ),
+        "missing": (
+            "Concepto médico completo, firmado y sustentado clínicamente."
+        ),
+    },
+    "notificacion": {
+        "importance": (
+            "La fecha de notificación puede determinar el inicio de términos y la validez de actuaciones."
+        ),
+        "review": (
+            "Medio utilizado, destinatario, fecha y hora, acuse, dirección correcta y anexos remitidos."
+        ),
+        "missing": (
+            "Constancia completa de notificación o recepción."
+        ),
+    },
+}
+
 
 @dataclass
 class RiskResult:
@@ -72,13 +228,41 @@ def document_inventory(documents: dict[str, list[PageTrace]]) -> Counter:
     )
 
 
+def _build_explanation(shared_topics: list[str]) -> dict[str, str]:
+    topic = shared_topics[0] if shared_topics else "hecho discutido"
+    guide = REVIEW_GUIDE.get(
+        topic,
+        {
+            "importance": (
+                "Las dos fuentes presentan versiones opuestas sobre un mismo hecho relevante."
+            ),
+            "review": (
+                "Documento original, fecha, autor, anexos, contexto completo, "
+                "firma, autenticidad y demás soportes relacionados."
+            ),
+            "missing": (
+                "Prueba independiente que permita establecer cuál versión está respaldada."
+            ),
+        },
+    )
+
+    return {
+        "Qué se contradice": (
+            f"Las fuentes presentan versiones opuestas sobre: {', '.join(shared_topics)}."
+        ),
+        "Por qué importa": guide["importance"],
+        "Todo lo que debe revisarse": guide["review"],
+        "Prueba que puede faltar": guide["missing"],
+        "Conclusión preliminar": (
+            "No es posible determinar automáticamente cuál versión es correcta. "
+            "Debe verificarse el contexto completo y la prueba de respaldo."
+        ),
+    }
+
+
 def detect_contradictions(
     documents: dict[str, list[PageTrace]],
 ) -> list[dict]:
-    """
-    Detecta contradicciones potenciales y conserva el texto completo
-    de ambas versiones, sin recortes.
-    """
     statements: list[dict] = []
 
     for name, pages in documents.items():
@@ -131,10 +315,7 @@ def detect_contradictions(
                 set(left["topics"]).intersection(right["topics"])
             )
 
-            if not shared:
-                continue
-
-            if left["polarity"] == right["polarity"]:
+            if not shared or left["polarity"] == right["polarity"]:
                 continue
 
             key = (
@@ -159,6 +340,7 @@ def detect_contradictions(
                 continue
 
             seen.add(key)
+            explanation = _build_explanation(shared)
 
             contradictions.append(
                 {
@@ -174,10 +356,7 @@ def detect_contradictions(
                     "Tipo de oposición": (
                         f"{left['polarity']} ↔ {right['polarity']}"
                     ),
-                    "Evaluación": (
-                        "Contradicción potencial; debe compararse el contexto "
-                        "completo de ambas fuentes."
-                    ),
+                    **explanation,
                     "Conclusión revisada": "",
                     "Observaciones": "",
                 }
@@ -209,21 +388,13 @@ def assess_risk(
             "Revisar las órdenes del fallo y solicitar prueba material de cumplimiento."
         )
 
-    if inventory["Incidente de desacato"] > 0 and inventory["Fallo de tutela"] == 0:
-        score += 15
-        reasons.append("Hay desacato sin fallo fuente dentro de los archivos.")
-        actions.append(
-            "Incorporar el fallo completo antes de valorar el desacato."
-        )
-
     low_quality = sum(
         row.get("Calidad") == "Baja"
         for row in quality_rows
     )
 
     if low_quality:
-        penalty = min(20, low_quality * 3)
-        score += penalty
+        score += min(20, low_quality * 3)
         reasons.append(
             f"{low_quality} página(s) presentan calidad de lectura baja."
         )
@@ -248,14 +419,10 @@ def assess_risk(
 
     for petition_name in petition_docs:
         requests = extract_requests(documents[petition_name])
-        comparison = compare_requests_with_answers(
-            requests,
-            answer_pages,
-        )
+        comparison = compare_requests_with_answers(requests, answer_pages)
 
         unanswered += sum(
-            row["Evaluación automática"]
-            == "Sin respuesta localizada"
+            row["Evaluación automática"] == "Sin respuesta localizada"
             for row in comparison
         )
 
@@ -265,7 +432,7 @@ def assess_risk(
             f"Se detectaron {unanswered} solicitud(es) sin respuesta localizada."
         )
         actions.append(
-            "Contrastar cada pregunta con la respuesta y preparar requerimiento o tutela, según el término aplicable."
+            "Contrastar cada pregunta con la respuesta y preparar la actuación correspondiente."
         )
 
     contradictions = detect_contradictions(documents)
@@ -276,7 +443,7 @@ def assess_risk(
             f"Se detectaron {len(contradictions)} contradicción(es) potencial(es)."
         )
         actions.append(
-            "Revisar el texto completo de cada versión y verificar cuál está respaldada."
+            "Revisar cada contradicción, su explicación y todos los soportes indicados."
         )
 
     score = min(100, score)

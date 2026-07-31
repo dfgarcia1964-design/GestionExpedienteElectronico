@@ -269,7 +269,21 @@ else:
             st.markdown(
                 f"**Tipo de oposición:** {row.get('Tipo de oposición', '')}"
             )
-            st.info(row.get("Evaluación", ""))
+
+            st.markdown("### Qué se contradice")
+            st.write(row.get("Qué se contradice", ""))
+
+            st.markdown("### Por qué importa")
+            st.write(row.get("Por qué importa", ""))
+
+            st.markdown("### Todo lo que debes revisar")
+            st.warning(row.get("Todo lo que debe revisarse", ""))
+
+            st.markdown("### Prueba que puede faltar")
+            st.write(row.get("Prueba que puede faltar", ""))
+
+            st.markdown("### Conclusión preliminar")
+            st.info(row.get("Conclusión preliminar", ""))
 
     st.markdown("### Tabla editable de contradicciones")
 
@@ -387,3 +401,4 @@ st.warning(
     "Una contradicción automática es una señal de revisión, no una conclusión jurídica. "
     "Debe verificarse el contexto completo de ambas fuentes."
 )
+
