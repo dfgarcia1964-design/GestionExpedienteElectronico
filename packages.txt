@@ -1,1 +1,4 @@
 libmagic1t64
+poppler-utils
+tesseract-ocr
+tesseract-ocr-spa
