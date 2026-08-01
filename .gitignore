@@ -71,7 +71,8 @@ GestionExpedienteElectronico_Windows.zip
 *.spec
 
 # Archivos Streamlit
-.streamlit/
+.streamlit/*
+!.streamlit/config.toml
 secrets.toml
 
 # Instrucción para crear el portable
