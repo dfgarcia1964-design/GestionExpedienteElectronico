@@ -194,18 +194,93 @@ def restore(data: dict) -> PageTrace:
 
 
 def explicit_term(text: str):
+    """
+    Detecta términos escritos con números, palabras y formatos judiciales como:
+    - "en el término improrrogable de UN DÍA"
+    - "UN DÍA (01) DÍA"
+    - "dentro de cuarenta y ocho (48) horas"
+    - "por el término de tres (3) días"
+    """
     clean = norm(text)
-    patterns = [
-        r"(?:dentro\s+de|termino\s+de|plazo\s+de)\s+(\d{1,3})\s+(horas?|dias?)",
-        r"\b(\d{1,3})\s+(horas?|dias?)\s+(?:siguientes|habiles|calendario|improrrogables)",
+
+    number_words = {
+        "un": 1,
+        "uno": 1,
+        "una": 1,
+        "dos": 2,
+        "tres": 3,
+        "cuatro": 4,
+        "cinco": 5,
+        "seis": 6,
+        "siete": 7,
+        "ocho": 8,
+        "nueve": 9,
+        "diez": 10,
+        "quince": 15,
+        "veinte": 20,
+        "treinta": 30,
+        "cuarenta y ocho": 48,
+        "cuarenta": 40,
+        "cuarenta y cinco": 45,
+    }
+
+    flexible_patterns = [
+        (
+            r"(?:dentro\s+de|por\s+el\s+termino\s+de|"
+            r"termino(?:\s+\w+){0,4}\s+de|"
+            r"plazo(?:\s+\w+){0,4}\s+de)\s+"
+            r"(?P<word>cuarenta\s+y\s+ocho|cuarenta\s+y\s+cinco|"
+            r"un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|"
+            r"nueve|diez|quince|veinte|treinta|cuarenta|\d{1,3})"
+            r"\s*(?P<unit>horas?|dias?)"
+            r"(?:\s*\((?P<paren>\d{1,3})\)\s*(?:horas?|dias?)?)?"
+        ),
+        (
+            r"\b(?P<word>\d{1,3})\s*(?P<unit>horas?|dias?)\s+"
+            r"(?:siguientes|habiles|calendario|improrrogables)"
+        ),
     ]
 
-    for pattern in patterns:
+    for pattern in flexible_patterns:
         match = re.search(pattern, clean)
-        if match:
-            return int(match.group(1)), (
-                "Horas" if "hora" in match.group(2) else "Días"
-            )
+
+        if not match:
+            continue
+
+        word = match.group("word").strip()
+        parenthetical = match.groupdict().get("paren")
+
+        if parenthetical:
+            quantity = int(parenthetical)
+        elif word.isdigit():
+            quantity = int(word)
+        else:
+            quantity = number_words.get(word)
+
+        if quantity is None:
+            continue
+
+        unit_text = match.group("unit")
+        unit = "Horas" if "hora" in unit_text else "Días"
+
+        return quantity, unit
+
+    # Formato frecuente: "UN DIA (01) DÍA"
+    repeated = re.search(
+        r"\b(?P<word>un|uno|una|dos|tres|\d{1,3})\s+"
+        r"(?P<unit>horas?|dias?)\s*"
+        r"\((?P<paren>\d{1,3})\)\s*(?:horas?|dias?)?",
+        clean,
+    )
+
+    if repeated:
+        quantity = int(repeated.group("paren"))
+        unit = (
+            "Horas"
+            if "hora" in repeated.group("unit")
+            else "Días"
+        )
+        return quantity, unit
 
     return None, None
 
@@ -227,7 +302,9 @@ def detect(pages: list[PageTrace]) -> list[dict]:
             for rule in RULES:
                 hits = sum(word in clean for word in rule["palabras"])
 
-                if hits == 0:
+                # Si el fragmento contiene un plazo expreso, se analiza aunque
+                # no coincida literalmente con las palabras clave de la regla.
+                if hits == 0 and quantity_found is None:
                     continue
 
                 day_rule = rule["dias"]
@@ -258,7 +335,12 @@ def detect(pages: list[PageTrace]) -> list[dict]:
                         ),
                         "Tipo de días": day_rule,
                         "Hecho inicial sugerido": rule["inicio"],
-                        "Seguridad preliminar": min(95, 35 + hits * 20),
+                        "Seguridad preliminar": min(
+                            95,
+                            55 + hits * 15
+                            if quantity_found is not None
+                            else 35 + hits * 20,
+                        ),
                         "Advertencia jurídica": rule["advertencia"],
                         "Fecha inicial confirmada": None,
                         "Hora inicial": time(8, 0),
@@ -560,3 +642,4 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     use_container_width=True,
 )
+
