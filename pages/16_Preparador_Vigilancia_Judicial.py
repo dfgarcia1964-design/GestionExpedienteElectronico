@@ -596,16 +596,26 @@ groups: dict[str, dict[str, bytes]] = defaultdict(dict)
 
 if upload_mode == "Carpeta completa":
     st.info(
-        "Pulsa «Examinar archivos» y selecciona una carpeta. Espera hasta que terminen de cargarse todos los archivos y desaparezcan los iconos rojos. "
+        "Pulsa «Examinar archivos», abre la carpeta, presiona Ctrl + A y luego pulsa Abrir. "
         "La aplicación cargará automáticamente los archivos compatibles "
         "que estén dentro de esa carpeta y sus subcarpetas."
     )
 
+    st.warning(
+        "Modo compatible activado: el navegador no está completando correctamente "
+        "la carga directa de carpetas. Pulsa «Examinar archivos», entra en la carpeta, "
+        "presiona Ctrl + A para seleccionar todos los documentos y luego pulsa Abrir."
+    )
+
     folder_files = st.file_uploader(
-        "Seleccionar carpeta completa",
+        "Seleccionar todos los archivos de la carpeta",
         type=["pdf", "docx", "txt", "jpg", "jpeg", "png", "eml"],
-        accept_multiple_files="directory",
-        key="vigilancia_folder_uploader",
+        accept_multiple_files=True,
+        key="vigilancia_folder_uploader_compatible",
+        help=(
+            "En Windows: abre la carpeta, presiona Ctrl + A y luego Abrir. "
+            "Esto carga todos los documentos sin usar el modo directorio."
+        ),
     )
 
     if not folder_files:
@@ -660,12 +670,8 @@ if upload_mode == "Carpeta completa":
         path = PurePosixPath(normalized_path)
         parts = path.parts
 
-        if len(parts) > 1:
-            expediente = parts[0]
-            relative_name = "/".join(parts[1:])
-        else:
-            expediente = "Carpeta seleccionada"
-            relative_name = path.name
+        expediente = "Carpeta seleccionada"
+        relative_name = path.name
 
         folder_rows.append(
             {
@@ -1080,6 +1086,7 @@ st.warning(
     "despacho, proceso, partes, hecho generador y descripción. "
     "El envío debe realizarlo personalmente el usuario en el portal oficial."
 )
+
 
 
 
