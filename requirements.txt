@@ -3,7 +3,6 @@ pandas
 openpyxl
 python-docx
 Pillow
-python-magic
 openai
 plotly
 pytz
