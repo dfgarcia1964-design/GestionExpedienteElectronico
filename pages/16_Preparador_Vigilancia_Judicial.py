@@ -366,6 +366,270 @@ def analyze_case(
     }
 
 
+def viability_assessment(case: dict) -> dict:
+    """
+    Evalúa preliminarmente si los documentos permiten sustentar una
+    Vigilancia Judicial Administrativa.
+
+    VERDE: hay proceso/despacho identificable, actuación pendiente y señales
+    documentales de demora o falta de respuesta.
+
+    AMARILLO: existen indicios, pero faltan documentos o datos esenciales.
+
+    ROJO: no aparece una demora administrativa clara o la pretensión parece
+    dirigirse únicamente a controvertir una decisión judicial.
+    """
+    metadata = case.get("metadata", {})
+    actions = case.get("actions", [])
+    documents = case.get("documents", {})
+
+    full_text = normalize(
+        "\n".join(
+            page.text
+            for pages in documents.values()
+            for page in pages
+            if page.text
+        )
+    )
+
+    positive = 0
+    negative = 0
+    strengths = []
+    weaknesses = []
+    missing = []
+    cautions = []
+
+    radicado = str(metadata.get("Radicado") or "").strip()
+    court = str(metadata.get("Juzgado") or "").strip()
+
+    if radicado:
+        positive += 15
+        strengths.append("Se identificó el número de radicación.")
+    else:
+        missing.append("Número completo de radicación del proceso.")
+
+    if court:
+        positive += 15
+        strengths.append("Se identificó el despacho judicial.")
+    else:
+        missing.append("Nombre exacto del juzgado o despacho vigilado.")
+
+    request_actions = [
+        row
+        for row in actions
+        if row.get("Tipo detectado") in {"Solicitud", "Impulso"}
+    ]
+
+    judicial_actions = [
+        row
+        for row in actions
+        if row.get("Tipo detectado") in {"Auto", "Fallo", "Notificación"}
+    ]
+
+    answer_actions = [
+        row
+        for row in actions
+        if row.get("Tipo detectado") == "Respuesta"
+    ]
+
+    if request_actions:
+        positive += 15
+        strengths.append(
+            "Se detectaron solicitudes, memoriales o actuaciones de impulso."
+        )
+    else:
+        missing.append(
+            "Memorial, solicitud o actuación cuya falta de trámite se cuestiona."
+        )
+
+    if judicial_actions:
+        positive += 10
+        strengths.append(
+            "Hay providencias o actuaciones judiciales que permiten reconstruir el trámite."
+        )
+    else:
+        missing.append(
+            "Providencias, constancias o consultas del expediente que muestren su estado."
+        )
+
+    delay_hits = case.get("delay_hits", [])
+
+    if delay_hits:
+        positive += min(20, len(delay_hits) * 5)
+        strengths.append(
+            "Los documentos contienen expresiones relacionadas con demora, "
+            "falta de decisión o término vencido."
+        )
+
+    days_without_action = case.get("days_without_action")
+
+    if days_without_action is not None:
+        if days_without_action >= 90:
+            positive += 25
+            strengths.append(
+                f"Han transcurrido aproximadamente {days_without_action} días "
+                "desde la última fecha documental detectada."
+            )
+        elif days_without_action >= 30:
+            positive += 15
+            strengths.append(
+                f"Han transcurrido aproximadamente {days_without_action} días "
+                "desde la última fecha documental detectada."
+            )
+        elif days_without_action >= 10:
+            positive += 5
+            cautions.append(
+                f"Solo se detectan aproximadamente {days_without_action} días "
+                "desde la última actuación; debe verificarse el término aplicable."
+            )
+        else:
+            negative += 15
+            weaknesses.append(
+                "La última actuación parece reciente; no se observa todavía una demora clara."
+            )
+    else:
+        missing.append(
+            "Fecha comprobable de la última actuación o de la solicitud pendiente."
+        )
+
+    if request_actions and not answer_actions:
+        positive += 15
+        strengths.append(
+            "No se detectó una respuesta posterior claramente identificada."
+        )
+
+    challenge_signals = (
+        "revocar la sentencia",
+        "revocar el fallo",
+        "cambiar la decision",
+        "modificar la sentencia",
+        "desacuerdo con la decision",
+        "el juez decidio mal",
+        "valoracion probatoria equivocada",
+        "revisar el fondo de la decision",
+    )
+
+    found_challenges = [
+        signal
+        for signal in challenge_signals
+        if signal in full_text
+    ]
+
+    if found_challenges:
+        negative += 35
+        weaknesses.append(
+            "La pretensión parece dirigirse a controvertir el contenido de una "
+            "decisión judicial. La vigilancia no sustituye recursos ni permite "
+            "ordenar cómo debe decidir el juez."
+        )
+
+    non_judicial_signals = (
+        "fiscalia general de la nacion",
+        "procuraduria general",
+        "contraloria",
+        "inspeccion de policia",
+        "entidad administrativa",
+    )
+
+    if any(signal in full_text for signal in non_judicial_signals) and not court:
+        negative += 25
+        weaknesses.append(
+            "No está claro que la autoridad cuestionada sea un despacho judicial "
+            "sometido a la competencia del Consejo Seccional."
+        )
+
+    useful_docs = sum(
+        1
+        for pages in documents.values()
+        if pages and any((page.text or "").strip() for page in pages)
+    )
+
+    if useful_docs >= 3:
+        positive += 10
+        strengths.append(
+            f"Se pudieron leer {useful_docs} documentos con contenido útil."
+        )
+    elif useful_docs == 0:
+        negative += 30
+        weaknesses.append(
+            "No se pudo leer contenido útil de los documentos."
+        )
+    else:
+        missing.append(
+            "Más soportes documentales para reconstruir el trámite completo."
+        )
+
+    score = max(0, min(100, positive - negative))
+
+    essential_missing = (
+        not radicado
+        or not court
+        or not request_actions
+        or days_without_action is None
+    )
+
+    if score >= 60 and not essential_missing and not found_challenges:
+        color = "Verde"
+        label = "VIABLE PRELIMINARMENTE"
+        recommendation = (
+            "La documentación permite preparar una solicitud de Vigilancia Judicial "
+            "Administrativa por posible demora o falta de gestión. Antes de radicar, "
+            "confirma la última actuación, la fecha de la solicitud pendiente y que "
+            "la petición no pretenda modificar el contenido de una decisión judicial."
+        )
+    elif score >= 25:
+        color = "Amarillo"
+        label = "VIABILIDAD CONDICIONADA"
+        recommendation = (
+            "Existen indicios, pero la solicitud no debería radicarse todavía sin "
+            "completar los datos o soportes faltantes. Reúne las constancias indicadas "
+            "y vuelve a ejecutar el análisis."
+        )
+    else:
+        color = "Rojo"
+        label = "NO VIABLE CON LOS DOCUMENTOS ACTUALES"
+        recommendation = (
+            "Con la documentación disponible no aparece suficientemente acreditada "
+            "una demora atribuible al despacho, o la inconformidad corresponde a un "
+            "asunto que debe tramitarse mediante recursos u otra actuación judicial."
+        )
+
+    next_steps = []
+
+    if color == "Verde":
+        next_steps = [
+            "Verificar el estado actual del proceso en la consulta oficial.",
+            "Adjuntar la solicitud o memorial pendiente y su constancia de recepción.",
+            "Adjuntar la última providencia o actuación del despacho.",
+            "Explicar qué actuación concreta sigue pendiente y desde cuándo.",
+            "Radicar la solicitud en el Consejo Seccional competente.",
+        ]
+    elif color == "Amarillo":
+        next_steps = [
+            f"Conseguir: {item}"
+            for item in missing
+        ] or [
+            "Revisar manualmente la cronología y completar la prueba de la demora."
+        ]
+    else:
+        next_steps = [
+            "Identificar si corresponde interponer un recurso, solicitar cumplimiento, "
+            "promover un incidente o presentar otra actuación procesal.",
+            "No usar la vigilancia únicamente para cuestionar el sentido de una decisión.",
+        ]
+
+    return {
+        "Semáforo de viabilidad": color,
+        "Resultado": label,
+        "Puntaje de viabilidad": score,
+        "Fortalezas": strengths,
+        "Debilidades": weaknesses,
+        "Documentos o datos faltantes": missing,
+        "Precauciones": cautions,
+        "Recomendación": recommendation,
+        "Actuaciones siguientes": next_steps,
+    }
+
 def portal_description(case: dict) -> str:
     metadata = case["metadata"]
     last_action = case["last_action"]
@@ -889,6 +1153,8 @@ summary_rows = []
 for case in analyses:
     metadata = case["metadata"]
     last_action = case["last_action"]
+    viability = viability_assessment(case)
+    case["viability"] = viability
 
     summary_rows.append(
         {
@@ -909,7 +1175,11 @@ for case in analyses:
             "Días desde última fecha": case["days_without_action"],
             "Semáforo": case["level"],
             "Puntaje": case["score"],
-            "Conclusión": case["conclusion"],
+            "Semáforo de viabilidad": viability["Semáforo de viabilidad"],
+            "Viabilidad": viability["Resultado"],
+            "Puntaje de viabilidad": viability["Puntaje de viabilidad"],
+            "Conclusión técnica": case["conclusion"],
+            "Recomendación": viability["Recomendación"],
             "Razones": " | ".join(case["reasons"]),
         }
     )
@@ -923,7 +1193,101 @@ st.dataframe(
 )
 
 
-st.subheader("3. Preparar solicitud para el portal")
+st.subheader("3. Semáforo de viabilidad por expediente")
+
+selected_viability_folder = st.selectbox(
+    "Selecciona un expediente para ver por qué es viable o no",
+    options=[case["folder"] for case in analyses],
+    key="viability_folder",
+)
+
+viability_case = next(
+    case
+    for case in analyses
+    if case["folder"] == selected_viability_folder
+)
+
+assessment = viability_case["viability"]
+
+icon = {
+    "Verde": "🟢",
+    "Amarillo": "🟡",
+    "Rojo": "🔴",
+}.get(
+    assessment["Semáforo de viabilidad"],
+    "⚪",
+)
+
+if assessment["Semáforo de viabilidad"] == "Verde":
+    st.success(
+        f"{icon} {assessment['Resultado']} — "
+        f"{assessment['Puntaje de viabilidad']}/100"
+    )
+elif assessment["Semáforo de viabilidad"] == "Amarillo":
+    st.warning(
+        f"{icon} {assessment['Resultado']} — "
+        f"{assessment['Puntaje de viabilidad']}/100"
+    )
+else:
+    st.error(
+        f"{icon} {assessment['Resultado']} — "
+        f"{assessment['Puntaje de viabilidad']}/100"
+    )
+
+st.markdown(f"**Recomendación:** {assessment['Recomendación']}")
+
+v1, v2 = st.columns(2)
+
+with v1:
+    st.markdown("#### Fortalezas documentales")
+
+    if assessment["Fortalezas"]:
+        for item in assessment["Fortalezas"]:
+            st.markdown(f"✅ {item}")
+    else:
+        st.caption("No se identificaron fortalezas suficientes.")
+
+    st.markdown("#### Precauciones")
+
+    if assessment["Precauciones"]:
+        for item in assessment["Precauciones"]:
+            st.markdown(f"⚠️ {item}")
+    else:
+        st.caption("No se identificaron precauciones adicionales.")
+
+with v2:
+    st.markdown("#### Debilidades")
+
+    if assessment["Debilidades"]:
+        for item in assessment["Debilidades"]:
+            st.markdown(f"❌ {item}")
+    else:
+        st.caption("No se identificaron debilidades importantes.")
+
+    st.markdown("#### Documentos o datos faltantes")
+
+    if assessment["Documentos o datos faltantes"]:
+        for item in assessment["Documentos o datos faltantes"]:
+            st.markdown(f"📎 {item}")
+    else:
+        st.caption("No se detectaron faltantes esenciales.")
+
+st.markdown("#### Actuación recomendada")
+
+for number, item in enumerate(
+    assessment["Actuaciones siguientes"],
+    start=1,
+):
+    st.markdown(f"{number}. {item}")
+
+st.info(
+    "El semáforo evalúa la suficiencia documental y la posible existencia "
+    "de demora. No predice la decisión del Consejo Seccional ni declara "
+    "responsabilidad disciplinaria."
+)
+
+
+st.subheader("4. Preparar solicitud para el portal")
 
 selected_folder = st.selectbox(
     "Selecciona el expediente que deseas radicar",
@@ -1012,7 +1376,7 @@ st.data_editor(
 )
 
 
-st.subheader("4. Descargar los dos PDF")
+st.subheader("5. Descargar los dos PDF")
 
 applicant = {
     "name": applicant_name,
@@ -1054,7 +1418,7 @@ with d2:
     )
 
 
-st.subheader("5. Exportar análisis de todas las carpetas")
+st.subheader("6. Exportar análisis de todas las carpetas")
 
 excel = io.BytesIO()
 
@@ -1062,6 +1426,33 @@ with pd.ExcelWriter(excel, engine="openpyxl") as writer:
     summary_df.to_excel(
         writer,
         sheet_name="Resumen expedientes",
+        index=False,
+    )
+
+    viability_export = pd.DataFrame(
+        [
+            {
+                "Carpeta": case["folder"],
+                "Semáforo": case["viability"]["Semáforo de viabilidad"],
+                "Resultado": case["viability"]["Resultado"],
+                "Puntaje": case["viability"]["Puntaje de viabilidad"],
+                "Fortalezas": " | ".join(case["viability"]["Fortalezas"]),
+                "Debilidades": " | ".join(case["viability"]["Debilidades"]),
+                "Faltantes": " | ".join(
+                    case["viability"]["Documentos o datos faltantes"]
+                ),
+                "Recomendación": case["viability"]["Recomendación"],
+                "Actuación siguiente": " | ".join(
+                    case["viability"]["Actuaciones siguientes"]
+                ),
+            }
+            for case in analyses
+        ]
+    )
+
+    viability_export.to_excel(
+        writer,
+        sheet_name="Viabilidad",
         index=False,
     )
 
@@ -1086,6 +1477,7 @@ st.warning(
     "despacho, proceso, partes, hecho generador y descripción. "
     "El envío debe realizarlo personalmente el usuario en el portal oficial."
 )
+
 
 
 
