@@ -580,29 +580,121 @@ with st.sidebar:
     )
 
 
-st.subheader("1. Cargar varias carpetas")
+st.subheader("1. Escoger directamente los documentos")
 
 st.info(
-    "Comprima las carpetas en un solo archivo ZIP. Cada carpeta principal "
-    "se tratará como un expediente independiente."
+    "Selecciona todos los archivos que quieras analizar. "
+    "No necesitas crear un ZIP. Después podrás indicar a qué expediente "
+    "o carpeta pertenece cada documento."
 )
 
-zip_file = st.file_uploader(
-    "Sube el ZIP con las carpetas de expedientes",
-    type=["zip"],
+uploaded_files = st.file_uploader(
+    "Escoge los documentos",
+    type=["pdf", "docx", "txt", "jpg", "jpeg", "png", "eml"],
+    accept_multiple_files=True,
 )
 
-if not zip_file:
+if not uploaded_files:
     st.stop()
 
 
-groups = read_zip(zip_file)
+file_rows = []
+
+for index, uploaded in enumerate(uploaded_files, start=1):
+    proposed_folder = re.sub(
+        r"[_\-]+",
+        " ",
+        PurePosixPath(uploaded.name).stem,
+    ).strip()
+
+    file_rows.append(
+        {
+            "Usar": True,
+            "Documento": uploaded.name,
+            "Expediente o carpeta": "Expediente 1",
+            "Nombre sugerido": proposed_folder,
+            "Orden": index,
+        }
+    )
+
+
+st.markdown("### Organizar los documentos por expediente")
+
+st.caption(
+    "En la columna «Expediente o carpeta» escribe el mismo nombre "
+    "para todos los documentos que pertenecen al mismo proceso."
+)
+
+organization_df = st.data_editor(
+    pd.DataFrame(file_rows),
+    use_container_width=True,
+    hide_index=True,
+    column_config={
+        "Usar": st.column_config.CheckboxColumn(
+            "Usar",
+        ),
+        "Documento": st.column_config.TextColumn(
+            "Documento",
+            disabled=True,
+            width="large",
+        ),
+        "Expediente o carpeta": st.column_config.TextColumn(
+            "Expediente o carpeta",
+            width="large",
+            required=True,
+        ),
+        "Nombre sugerido": st.column_config.TextColumn(
+            "Nombre sugerido",
+            disabled=True,
+        ),
+        "Orden": st.column_config.NumberColumn(
+            "Orden",
+            min_value=1,
+            step=1,
+        ),
+    },
+    key="document_organization",
+)
+
+
+uploaded_by_name = {
+    uploaded.name: uploaded
+    for uploaded in uploaded_files
+}
+
+groups: dict[str, dict[str, bytes]] = defaultdict(dict)
+
+for _, row in organization_df.iterrows():
+    if not bool(row["Usar"]):
+        continue
+
+    document_name = str(row["Documento"])
+    folder_name = str(
+        row["Expediente o carpeta"]
+    ).strip()
+
+    if not folder_name:
+        folder_name = "Sin clasificar"
+
+    uploaded = uploaded_by_name.get(document_name)
+
+    if uploaded is None:
+        continue
+
+    groups[folder_name][document_name] = uploaded.getvalue()
+
 
 if not groups:
     st.error(
-        "El ZIP no contiene archivos compatibles dentro de carpetas."
+        "No hay documentos seleccionados para analizar."
     )
     st.stop()
+
+
+st.success(
+    f"Se organizaron {len(uploaded_files)} documento(s) "
+    f"en {len(groups)} expediente(s)."
+)
 
 
 config = {
@@ -629,6 +721,11 @@ for index, (folder, files) in enumerate(groups.items()):
 
 message.empty()
 
+
+st.info(
+    "Puedes volver arriba y cambiar el nombre de «Expediente o carpeta». "
+    "La aplicación volverá a agrupar y analizar los documentos automáticamente."
+)
 
 st.subheader("2. Resultado comparativo")
 
@@ -834,3 +931,4 @@ st.warning(
     "despacho, proceso, partes, hecho generador y descripción. "
     "El envío debe realizarlo personalmente el usuario en el portal oficial."
 )
+
