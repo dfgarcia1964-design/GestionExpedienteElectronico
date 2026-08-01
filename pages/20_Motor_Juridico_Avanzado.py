@@ -587,6 +587,15 @@ with pd.ExcelWriter(output, engine="openpyxl") as writer:
         index=False,
     )
 
+    st.session_state.get(
+        "step_document_summary",
+        pd.DataFrame(),
+    ).to_excel(
+        writer,
+        sheet_name="Documentos paso a paso",
+        index=False,
+    )
+
 st.download_button(
     "Descargar análisis avanzado en Excel",
     data=output.getvalue(),
@@ -595,4 +604,5 @@ st.download_button(
     use_container_width=True,
     type="primary",
 )
+
 
