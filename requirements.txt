@@ -11,9 +11,8 @@ xlwings
 openai
 plotly
 pytz
-python-docx
 pytesseract
 pdf2image
-
 reportlab
-
+pypdf>=5.0.0
+PyPDF2>=3.0.1

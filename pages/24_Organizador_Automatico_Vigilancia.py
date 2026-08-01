@@ -9,7 +9,10 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
-from pypdf import PdfReader, PdfWriter
+try:
+    from pypdf import PdfReader, PdfWriter
+except ModuleNotFoundError:
+    from PyPDF2 import PdfReader, PdfWriter
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import cm
@@ -880,3 +883,4 @@ else:
         "El paquete contiene solicitud borrador, anexos, índice, cronología "
         "y copias organizadas de los documentos."
     )
+
