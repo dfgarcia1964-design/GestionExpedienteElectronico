@@ -449,6 +449,19 @@ with st.sidebar:
     dpi = st.select_slider("Resolución OCR", [150, 200, 220, 250, 300], value=220)
 
 
+IMPORTANT_QUESTIONS = [
+    "¿Cuál es la última actuación judicial registrada y qué actuación continúa pendiente?",
+    "¿Existe un término legal o judicial vencido y desde qué fecha debe contarse?",
+    "¿El despacho dejó vencer un término sin emitir la decisión o actuación correspondiente?",
+    "¿Se presentó un memorial, incidente o solicitud que todavía no ha sido resuelto?",
+    "¿Existe constancia válida de notificación a todas las partes y sujetos vinculados?",
+    "¿Hay contradicciones entre los hechos, las pruebas, la motivación y la parte resolutiva?",
+    "¿El despacho confundió nombres, entidades, fechas, radicados, dispositivos u objetos de la orden?",
+    "¿Se omitió valorar una prueba relevante que aparece aportada en el expediente?",
+    "¿El despacho adoptó medidas suficientes para lograr el cumplimiento efectivo del fallo de tutela?",
+    "¿Los documentos muestran conductas o demoras que podrían justificar una Vigilancia Judicial Administrativa?",
+]
+
 uploaded_files = st.file_uploader(
     "Carga uno o varios documentos del expediente",
     type=["pdf", "docx", "txt", "jpg", "jpeg", "png", "eml"],
@@ -480,26 +493,75 @@ with st.spinner("Leyendo y organizando documentos..."):
 
 st.subheader("1. Formular una pregunta y obtener respuesta")
 
-question = st.text_area(
-    "Pregunta sobre el expediente",
-    placeholder=(
-        "Ejemplo: ¿El juzgado dejó vencer el término sin decidir? "
-        "¿Qué actuación está pendiente? ¿Existe prueba de notificación?"
-    ),
-    height=100,
+st.markdown("### Diez preguntas relevantes para revisar el expediente")
+
+selected_question = st.selectbox(
+    "Selecciona una pregunta importante",
+    options=["Escribir otra pregunta"] + IMPORTANT_QUESTIONS,
+    key="important_question_selector",
 )
 
-if question.strip():
-    answer, evidence = answer_question(question, all_pages)
+if selected_question == "Escribir otra pregunta":
+    question = st.text_area(
+        "Escribe tu pregunta",
+        placeholder=(
+            "Ejemplo: ¿El juzgado dejó vencer el término sin decidir?"
+        ),
+        height=100,
+        key="custom_process_question",
+    )
+else:
+    st.info(f"Pregunta seleccionada: {selected_question}")
+    question = selected_question
+
+answer_button = st.button(
+    "Analizar y responder la pregunta",
+    type="primary",
+    use_container_width=True,
+)
+
+if answer_button and question.strip():
+    answer, evidence = answer_question(
+        question,
+        all_pages,
+    )
+
+    st.markdown("### Respuesta basada en los documentos")
     st.info(answer)
 
     if evidence:
-        st.markdown("#### Fragmentos usados para responder")
+        evidence_df = pd.DataFrame(evidence)
+
+        st.markdown("#### Fragmentos utilizados para responder")
         st.dataframe(
-            pd.DataFrame(evidence),
+            evidence_df,
             use_container_width=True,
             hide_index=True,
         )
+
+        st.markdown("#### Detalle de la respuesta")
+
+        for number, item in enumerate(evidence, start=1):
+            with st.expander(
+                f"Evidencia {number}: {item['Documento']} — página {item['Página']}",
+                expanded=number == 1,
+            ):
+                st.markdown(f"**Fragmento completo:** {item['Fragmento']}")
+                st.markdown(
+                    f"**Coincidencias con la pregunta:** {item['Coincidencias']}"
+                )
+    else:
+        st.warning(
+            "No se encontró evidencia documental suficiente para responder."
+        )
+
+st.markdown("#### Lista de las 10 preguntas de control")
+
+for number, important_question in enumerate(
+    IMPORTANT_QUESTIONS,
+    start=1,
+):
+    st.markdown(f"{number}. {important_question}")
 
 
 st.subheader("2. Conteo automático de términos")
@@ -550,30 +612,283 @@ else:
     st.dataframe(conducts_df, use_container_width=True, hide_index=True)
 
 
-st.subheader("5. Semáforo integral")
+st.subheader("5. Semáforo integral — informe detallado")
 
-risk = 0
-risk += len(errors_df) * 15
-risk += len(conducts_df) * 20
+expired_terms = (
+    terms_df[terms_df["Estado"] == "Vencido"]
+    if not terms_df.empty
+    else pd.DataFrame()
+)
 
-if not terms_df.empty and (terms_df["Estado"] == "Vencido").any():
-    risk += 30
+high_errors = (
+    errors_df[errors_df["Severidad"] == "Alta"]
+    if not errors_df.empty
+    else pd.DataFrame()
+)
 
-risk = min(100, risk)
+risk_terms = 30 if not expired_terms.empty else 0
+risk_errors = min(35, len(errors_df) * 15)
+risk_conducts = min(35, len(conducts_df) * 20)
+risk = min(
+    100,
+    risk_terms + risk_errors + risk_conducts,
+)
 
 if risk >= 65:
+    semaphore_color = "Rojo"
+    semaphore_title = "REVISIÓN PRIORITARIA"
     st.error(
-        f"🔴 REVISIÓN PRIORITARIA — {risk}/100. "
+        f"🔴 {semaphore_title} — {risk}/100. "
         "Hay términos vencidos, errores relevantes o conductas que deben comprobarse."
     )
 elif risk >= 30:
+    semaphore_color = "Amarillo"
+    semaphore_title = "REQUIERE COMPLETAR Y VERIFICAR"
     st.warning(
-        f"🟡 REQUIERE COMPLETAR Y VERIFICAR — {risk}/100."
+        f"🟡 {semaphore_title} — {risk}/100."
     )
 else:
+    semaphore_color = "Verde"
+    semaphore_title = "SIN INDICIOS SUFICIENTES"
     st.success(
-        f"🟢 SIN INDICIOS SUFICIENTES CON LOS DOCUMENTOS ACTUALES — {risk}/100."
+        f"🟢 {semaphore_title} — {risk}/100."
     )
+
+
+st.markdown("### Composición del puntaje")
+
+score_details = pd.DataFrame(
+    [
+        {
+            "Componente": "Términos vencidos",
+            "Hallazgos": len(expired_terms),
+            "Puntaje aportado": risk_terms,
+            "Máximo": 30,
+        },
+        {
+            "Componente": "Errores detectados",
+            "Hallazgos": len(errors_df),
+            "Puntaje aportado": risk_errors,
+            "Máximo": 35,
+        },
+        {
+            "Componente": "Conductas relevantes",
+            "Hallazgos": len(conducts_df),
+            "Puntaje aportado": risk_conducts,
+            "Máximo": 35,
+        },
+    ]
+)
+
+st.dataframe(
+    score_details,
+    use_container_width=True,
+    hide_index=True,
+)
+
+
+st.markdown("### Razones de importancia")
+
+important_reasons = []
+
+if not expired_terms.empty:
+    important_reasons.append(
+        f"Se detectaron {len(expired_terms)} término(s) clasificado(s) como vencido(s)."
+    )
+
+if not high_errors.empty:
+    important_reasons.append(
+        f"Se detectaron {len(high_errors)} posible(s) error(es) de severidad alta."
+    )
+
+if not conducts_df.empty:
+    important_reasons.append(
+        f"Se identificaron {len(conducts_df)} posible(s) conducta(s) relacionada(s) "
+        "con demora, falta de trámite, notificación o cumplimiento."
+    )
+
+if important_reasons:
+    for reason in important_reasons:
+        st.markdown(f"⚠️ {reason}")
+else:
+    st.markdown(
+        "✅ Las reglas automáticas no encontraron razones suficientes "
+        "para una revisión prioritaria."
+    )
+
+
+st.markdown("### Detalle de términos vencidos")
+
+if expired_terms.empty:
+    st.success("No se clasificaron términos como vencidos.")
+else:
+    st.dataframe(
+        expired_terms,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    for index, row in expired_terms.iterrows():
+        with st.expander(
+            f"Término vencido: {row['Documento']} — página {row['Página']}",
+            expanded=True,
+        ):
+            st.markdown(f"**Texto:** {row['Fragmento']}")
+            st.markdown(
+                f"**Cantidad:** {row['Cantidad']} {str(row['Unidad']).lower()}"
+            )
+            st.markdown(
+                f"**Fecha del escrito usada:** {row['Fecha del escrito usada']}"
+            )
+            st.markdown(
+                f"**Inicio estimado:** {row['Inicio estimado']}"
+            )
+            st.markdown(
+                f"**Vencimiento estimado:** {row['Vencimiento estimado']}"
+            )
+            st.warning(row["Advertencia"])
+
+
+st.markdown("### Detalle de posibles errores")
+
+if errors_df.empty:
+    st.success("No se detectaron errores claros con las reglas automáticas.")
+else:
+    for index, row in errors_df.iterrows():
+        severity_icon = "🔴" if row["Severidad"] == "Alta" else "🟡"
+
+        with st.expander(
+            f"{severity_icon} {row['Posible error']} — {row['Documento']}",
+            expanded=row["Severidad"] == "Alta",
+        ):
+            st.markdown(f"**Categoría:** {row['Categoría']}")
+            st.markdown(f"**Evidencia encontrada:** {row['Evidencia']}")
+            st.markdown(f"**Explicación:** {row['Explicación']}")
+            st.markdown(f"**Norma posible:** {row['Norma posible']}")
+            st.markdown(f"**Severidad:** {row['Severidad']}")
+            st.caption(
+                "El hallazgo debe contrastarse con el documento completo y "
+                "con las demás piezas del expediente."
+            )
+
+
+st.markdown("### Detalle de conductas relevantes para Vigilancia Judicial")
+
+if conducts_df.empty:
+    st.warning(
+        "No se encontraron conductas claras con las reglas actuales."
+    )
+else:
+    for index, row in conducts_df.iterrows():
+        with st.expander(
+            f"🏛️ {row['Posible conducta relevante']} — {row['Documento']}",
+            expanded=True,
+        ):
+            st.markdown(f"**Coincidencias:** {row['Coincidencias']}")
+            st.markdown(
+                f"**Fragmento principal:** {row['Fragmento principal']}"
+            )
+            st.markdown(
+                f"**Norma o marco posible:** {row['Norma o marco posible']}"
+            )
+            st.markdown(
+                f"**Utilidad para la vigilancia:** "
+                f"{row['Utilidad para vigilancia']}"
+            )
+            st.markdown(f"**Conclusión preliminar:** {row['Conclusión']}")
+
+
+st.markdown("### Actuaciones recomendadas")
+
+recommended_actions = []
+
+if not expired_terms.empty:
+    recommended_actions.extend(
+        [
+            "Confirmar la fecha real de notificación o ejecutoria de cada providencia.",
+            "Solicitar constancia secretarial del vencimiento del término.",
+            "Verificar si después del vencimiento el expediente pasó al despacho.",
+        ]
+    )
+
+if not conducts_df.empty:
+    recommended_actions.extend(
+        [
+            "Obtener una consulta actualizada del expediente.",
+            "Identificar la actuación concreta que permanece pendiente.",
+            "Adjuntar el memorial o solicitud sin resolver y su constancia de recepción.",
+            "Preparar una cronología breve con fechas, documentos y actuaciones pendientes.",
+        ]
+    )
+
+if not errors_df.empty:
+    recommended_actions.extend(
+        [
+            "Comparar cada posible error con el documento fuente correspondiente.",
+            "Separar los errores que deben discutirse mediante recursos de aquellos "
+            "que muestran falta de gestión administrativa.",
+        ]
+    )
+
+if risk >= 65:
+    recommended_actions.append(
+        "Preparar la solicitud de Vigilancia Judicial Administrativa, "
+        "sin pedir que el Consejo cambie el contenido de una providencia."
+    )
+
+recommended_actions = list(
+    dict.fromkeys(recommended_actions)
+)
+
+if recommended_actions:
+    for number, action in enumerate(recommended_actions, start=1):
+        st.markdown(f"{number}. {action}")
+else:
+    st.info(
+        "Con los documentos actuales no se recomienda radicar todavía. "
+        "Carga las constancias y actuaciones faltantes."
+    )
+
+
+st.markdown("### Conclusión integral")
+
+if risk >= 65:
+    integral_conclusion = (
+        "El expediente requiere revisión prioritaria porque concurren uno o más "
+        "indicadores de término vencido, posible error relevante o conducta relacionada "
+        "con la gestión del despacho. El puntaje no prueba responsabilidad: indica que "
+        "deben confirmarse la cronología, la notificación, la actuación pendiente y el "
+        "estado actual antes de radicar la Vigilancia Judicial."
+    )
+elif risk >= 30:
+    integral_conclusion = (
+        "Existen indicios, pero la documentación todavía debe completarse o verificarse. "
+        "No conviene radicar hasta confirmar fechas, términos, constancias y actuación pendiente."
+    )
+else:
+    integral_conclusion = (
+        "Las reglas automáticas no encontraron indicios suficientes para recomendar "
+        "una Vigilancia Judicial con los documentos actuales."
+    )
+
+st.info(integral_conclusion)
+
+st.session_state["integral_score_details"] = score_details
+st.session_state["integral_summary"] = pd.DataFrame(
+    [
+        {
+            "Semáforo": semaphore_color,
+            "Resultado": semaphore_title,
+            "Puntaje": risk,
+            "Términos vencidos": len(expired_terms),
+            "Errores detectados": len(errors_df),
+            "Errores de severidad alta": len(high_errors),
+            "Conductas relevantes": len(conducts_df),
+            "Conclusión": integral_conclusion,
+            "Actuaciones recomendadas": " | ".join(recommended_actions),
+        }
+    ]
+)
 
 
 st.subheader("6. Exportar análisis")
@@ -585,6 +900,24 @@ with pd.ExcelWriter(output, engine="openpyxl") as writer:
     errors_df.to_excel(writer, sheet_name="Errores", index=False)
     conducts_df.to_excel(writer, sheet_name="Conductas vigilancia", index=False)
 
+    st.session_state.get(
+        "integral_score_details",
+        pd.DataFrame(),
+    ).to_excel(
+        writer,
+        sheet_name="Detalle puntaje",
+        index=False,
+    )
+
+    st.session_state.get(
+        "integral_summary",
+        pd.DataFrame(),
+    ).to_excel(
+        writer,
+        sheet_name="Conclusión integral",
+        index=False,
+    )
+
 st.download_button(
     "Descargar revisión integral en Excel",
     data=output.getvalue(),
@@ -593,3 +926,4 @@ st.download_button(
     use_container_width=True,
     type="primary",
 )
+
