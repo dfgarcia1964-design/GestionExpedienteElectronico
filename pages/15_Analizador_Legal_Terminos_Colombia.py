@@ -3,7 +3,7 @@
 import hashlib
 import io
 import re
-from datetime import datetime, timedelta, time
+from datetime import date, datetime, time, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -21,34 +21,62 @@ st.set_page_config(
 
 st.title("⚖️ Analizador Legal de Términos Colombia")
 st.caption(
-    "Sube un documento, identifica posibles términos jurídicos, "
-    "revisa la norma sugerida y confirma el cómputo."
+    "Detecta el término, calcula cuándo vence y propone la actuación que puede continuar."
 )
 
 st.warning(
-    "La clasificación es preliminar. Debes confirmar el régimen, la norma, "
-    "la fecha de notificación y la regla de cómputo antes de usar el resultado."
+    "El resultado es preliminar. Debes confirmar la fecha efectiva de notificación, "
+    "la regla de cómputo, los festivos y la norma aplicable."
 )
 
 
+NUMBER_WORDS = {
+    "un": 1,
+    "uno": 1,
+    "una": 1,
+    "dos": 2,
+    "tres": 3,
+    "cuatro": 4,
+    "cinco": 5,
+    "seis": 6,
+    "siete": 7,
+    "ocho": 8,
+    "nueve": 9,
+    "diez": 10,
+    "quince": 15,
+    "veinte": 20,
+    "treinta": 30,
+    "cuarenta": 40,
+    "cuarenta y ocho": 48,
+}
+
+
 RULES = [
+    {
+        "clase": "Término judicial otorgado en auto o providencia",
+        "regimen": "Proceso judicial / tutela",
+        "norma": "Providencia judicial y regla procesal aplicable",
+        "articulo": "Verificar artículo citado y artículo 118 CGP, si procede",
+        "inicio": "Día siguiente a la notificación, salvo regla especial",
+        "palabras": (
+            "ordena",
+            "requerir",
+            "termino improrrogable",
+            "dentro de",
+            "plazo de",
+            "vencido el termino",
+        ),
+    },
     {
         "clase": "Impugnación de fallo de tutela",
         "regimen": "Acción de tutela",
         "norma": "Decreto 2591 de 1991",
         "articulo": "Artículo 31",
-        "cantidad": 3,
-        "unidad": "Días",
-        "dias": "Por confirmar",
         "inicio": "Notificación del fallo",
         "palabras": (
             "impugnacion",
             "impugnar",
             "fallo de tutela",
-        ),
-        "advertencia": (
-            "Debe verificarse la fecha de notificación. "
-            "La impugnación no suspende el cumplimiento inmediato del fallo."
         ),
     },
     {
@@ -56,121 +84,51 @@ RULES = [
         "regimen": "Derecho de petición",
         "norma": "Ley 1755 de 2015",
         "articulo": "Artículo 14",
-        "cantidad": 15,
-        "unidad": "Días",
-        "dias": "Hábiles",
         "inicio": "Recepción de la petición",
         "palabras": (
             "derecho de peticion",
             "peticion general",
         ),
-        "advertencia": "Puede existir un término especial según la materia.",
     },
     {
         "clase": "Petición de documentos o información",
         "regimen": "Derecho de petición",
         "norma": "Ley 1755 de 2015",
         "articulo": "Artículo 14",
-        "cantidad": 10,
-        "unidad": "Días",
-        "dias": "Hábiles",
         "inicio": "Recepción de la petición",
         "palabras": (
             "solicitud de documentos",
             "solicitud de informacion",
-            "expediente",
             "copias",
-        ),
-        "advertencia": (
-            "Debe confirmarse que la solicitud sea realmente de documentos o información."
+            "expediente",
         ),
     },
     {
-        "clase": "Consulta a una autoridad",
-        "regimen": "Derecho de petición",
-        "norma": "Ley 1755 de 2015",
-        "articulo": "Artículo 14",
-        "cantidad": 30,
-        "unidad": "Días",
-        "dias": "Hábiles",
-        "inicio": "Recepción de la consulta",
-        "palabras": (
-            "consulta",
-            "concepto juridico",
-        ),
-        "advertencia": "No toda petición debe clasificarse como consulta.",
-    },
-    {
-        "clase": "Recurso de reposición o apelación administrativo",
+        "clase": "Recurso administrativo",
         "regimen": "Procedimiento administrativo",
         "norma": "Ley 1437 de 2011",
         "articulo": "Artículo 76",
-        "cantidad": 10,
-        "unidad": "Días",
-        "dias": "Hábiles",
         "inicio": "Notificación del acto administrativo",
         "palabras": (
             "recurso de reposicion",
             "recurso de apelacion",
             "acto administrativo",
         ),
-        "advertencia": (
-            "Debe verificarse la procedencia del recurso y la forma de notificación."
-        ),
-    },
-    {
-        "clase": "Notificación personal electrónica judicial",
-        "regimen": "Proceso judicial digital",
-        "norma": "Ley 2213 de 2022",
-        "articulo": "Artículo 8",
-        "cantidad": 2,
-        "unidad": "Días",
-        "dias": "Hábiles",
-        "inicio": "Envío del mensaje de datos",
-        "palabras": (
-            "notificacion personal",
-            "mensaje de datos",
-            "correo electronico",
-        ),
-        "advertencia": (
-            "Debe verificarse cuándo se entiende realizada la notificación "
-            "y desde cuándo inicia el término principal."
-        ),
-    },
-    {
-        "clase": "Término judicial otorgado por providencia",
-        "regimen": "Proceso judicial",
-        "norma": "Ley 1564 de 2012",
-        "articulo": "Artículo 118",
-        "cantidad": 0,
-        "unidad": "Días",
-        "dias": "Por confirmar",
-        "inicio": "Notificación, audiencia o ejecutoria, según el caso",
-        "palabras": (
-            "termino de",
-            "traslado",
-            "ejecutoria",
-            "dentro de",
-            "plazo de",
-        ),
-        "advertencia": (
-            "El artículo 118 contiene reglas distintas. "
-            "Debe identificarse cómo fue concedido el término."
-        ),
     },
 ]
 
 
 def norm(text: str) -> str:
-    return (
+    return re.sub(
+        r"\s+",
+        " ",
         text.translate(
             str.maketrans(
                 "áéíóúüñÁÉÍÓÚÜÑ",
                 "aeiouunAEIOUUN",
             )
-        )
-        .lower()
-    )
+        ).lower(),
+    ).strip()
 
 
 def digest(content: bytes) -> str:
@@ -186,164 +144,172 @@ def cached_load(name, content_hash, content, enabled, min_chars, max_pages, dpi)
         max_ocr_pages=max_pages,
         dpi=dpi,
     )
-    return [x.to_dict() for x in load_document(name, content, config)]
+    return [item.to_dict() for item in load_document(name, content, config)]
 
 
 def restore(data: dict) -> PageTrace:
     return PageTrace(**data)
 
 
-def explicit_term(text: str):
-    """
-    Detecta términos escritos con números, palabras y formatos judiciales como:
-    - "en el término improrrogable de UN DÍA"
-    - "UN DÍA (01) DÍA"
-    - "dentro de cuarenta y ocho (48) horas"
-    - "por el término de tres (3) días"
-    """
+def explicit_term(text: str) -> tuple[int | None, str | None, str]:
     clean = norm(text)
 
-    number_words = {
-        "un": 1,
-        "uno": 1,
-        "una": 1,
-        "dos": 2,
-        "tres": 3,
-        "cuatro": 4,
-        "cinco": 5,
-        "seis": 6,
-        "siete": 7,
-        "ocho": 8,
-        "nueve": 9,
-        "diez": 10,
-        "quince": 15,
-        "veinte": 20,
-        "treinta": 30,
-        "cuarenta y ocho": 48,
-        "cuarenta": 40,
-        "cuarenta y cinco": 45,
-    }
+    word_pattern = (
+        "cuarenta y ocho|cuarenta|treinta|veinte|quince|diez|"
+        "nueve|ocho|siete|seis|cinco|cuatro|tres|dos|un|uno|una"
+    )
 
-    flexible_patterns = [
+    patterns = [
         (
-            r"(?:dentro\s+de|por\s+el\s+termino\s+de|"
-            r"termino(?:\s+\w+){0,4}\s+de|"
-            r"plazo(?:\s+\w+){0,4}\s+de)\s+"
-            r"(?P<word>cuarenta\s+y\s+ocho|cuarenta\s+y\s+cinco|"
-            r"un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|"
-            r"nueve|diez|quince|veinte|treinta|cuarenta|\d{1,3})"
-            r"\s*(?P<unit>horas?|dias?)"
-            r"(?:\s*\((?P<paren>\d{1,3})\)\s*(?:horas?|dias?)?)?"
+            rf"(?:dentro de|por el termino de|"
+            rf"termino(?: \w+){{0,4}} de|plazo(?: \w+){{0,4}} de)\s+"
+            rf"(?P<number>{word_pattern}|\d{{1,3}})\s*"
+            rf"(?P<unit>horas?|dias?)"
+            rf"(?:\s*\((?P<paren>\d{{1,3}})\)\s*(?:horas?|dias?)?)?"
         ),
         (
-            r"\b(?P<word>\d{1,3})\s*(?P<unit>horas?|dias?)\s+"
-            r"(?:siguientes|habiles|calendario|improrrogables)"
+            rf"\b(?P<number>{word_pattern}|\d{{1,3}})\s+"
+            rf"(?P<unit>horas?|dias?)\s*"
+            rf"(?:\((?P<paren>\d{{1,3}})\)\s*(?:horas?|dias?)?)?"
+            rf"\s*(?:siguientes|habiles|calendario|improrrogables)?"
         ),
     ]
 
-    for pattern in flexible_patterns:
+    for pattern in patterns:
         match = re.search(pattern, clean)
 
         if not match:
             continue
 
-        word = match.group("word").strip()
+        raw_number = match.group("number").strip()
         parenthetical = match.groupdict().get("paren")
 
         if parenthetical:
             quantity = int(parenthetical)
-        elif word.isdigit():
-            quantity = int(word)
+        elif raw_number.isdigit():
+            quantity = int(raw_number)
         else:
-            quantity = number_words.get(word)
+            quantity = NUMBER_WORDS.get(raw_number)
 
         if quantity is None:
             continue
 
-        unit_text = match.group("unit")
-        unit = "Horas" if "hora" in unit_text else "Días"
+        unit = "Horas" if "hora" in match.group("unit") else "Días"
+        character = "Improrrogable" if "improrrogable" in clean else "Ordinario o por confirmar"
 
-        return quantity, unit
+        return quantity, unit, character
 
-    # Formato frecuente: "UN DIA (01) DÍA"
-    repeated = re.search(
-        r"\b(?P<word>un|uno|una|dos|tres|\d{1,3})\s+"
-        r"(?P<unit>horas?|dias?)\s*"
-        r"\((?P<paren>\d{1,3})\)\s*(?:horas?|dias?)?",
-        clean,
+    return None, None, ""
+
+
+def action_detected(fragment: str) -> str:
+    clean = norm(fragment)
+
+    actions = (
+        ("rendir informe o dictamen", ("informe", "dictamen")),
+        ("pronunciarse", ("pronuncien", "pronunciarse")),
+        ("dar cumplimiento", ("dar cumplimiento", "cumplimiento")),
+        ("entregar", ("entregar", "entrega")),
+        ("responder", ("responder", "respuesta")),
+        ("aportar documentos", ("aportar", "allegar", "remitir")),
+        ("impugnar", ("impugnar", "impugnacion")),
     )
 
-    if repeated:
-        quantity = int(repeated.group("paren"))
-        unit = (
-            "Horas"
-            if "hora" in repeated.group("unit")
-            else "Días"
-        )
-        return quantity, unit
+    for label, words in actions:
+        if any(word in clean for word in words):
+            return label
 
-    return None, None
+    return "Actuación por confirmar"
+
+
+def post_expiry_instruction(full_text: str) -> str:
+    clean = norm(full_text)
+
+    patterns = [
+        r"vencido el termino[^\.]{0,350}",
+        r"una vez vencido el termino[^\.]{0,350}",
+        r"cumplido el termino[^\.]{0,350}",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, clean)
+
+        if match:
+            return match.group(0).strip().capitalize()
+
+    return ""
+
+
+def classify(fragment: str) -> list[dict]:
+    clean = norm(fragment)
+    quantity, unit, character = explicit_term(fragment)
+
+    if quantity is None:
+        return []
+
+    results = []
+
+    for rule in RULES:
+        hits = sum(word in clean for word in rule["palabras"])
+
+        if hits == 0 and rule["clase"] != "Término judicial otorgado en auto o providencia":
+            continue
+
+        day_rule = "Por confirmar"
+
+        if unit == "Horas":
+            day_rule = "Horas continuas o por confirmar"
+        elif "habil" in clean:
+            day_rule = "Hábiles"
+        elif "calendario" in clean:
+            day_rule = "Calendario"
+
+        results.append(
+            {
+                "Clase de término": rule["clase"],
+                "Régimen jurídico": rule["regimen"],
+                "Norma sugerida": rule["norma"],
+                "Artículo": rule["articulo"],
+                "Cantidad": quantity,
+                "Unidad": unit,
+                "Tipo de días": day_rule,
+                "Carácter": character,
+                "Hecho inicial sugerido": rule["inicio"],
+                "Actuación exigida": action_detected(fragment),
+                "Seguridad preliminar": min(95, 60 + hits * 10),
+            }
+        )
+
+        if hits:
+            break
+
+    return results
 
 
 def detect(pages: list[PageTrace]) -> list[dict]:
+    full_text = "\n".join(page.text for page in pages)
+    after_expiry = post_expiry_instruction(full_text)
     rows = []
 
     for page in pages:
         fragments = [
-            x.strip()
-            for x in re.split(r"(?<=[\.\;\:])\s+|\n+", page.text)
-            if len(x.strip()) >= 25
+            item.strip()
+            for item in re.split(r"(?<=[\.\;\:])\s+|\n+", page.text)
+            if len(item.strip()) >= 20
         ]
 
         for fragment in fragments:
-            clean = norm(fragment)
-            quantity_found, unit_found = explicit_term(fragment)
-
-            for rule in RULES:
-                hits = sum(word in clean for word in rule["palabras"])
-
-                # Si el fragmento contiene un plazo expreso, se analiza aunque
-                # no coincida literalmente con las palabras clave de la regla.
-                if hits == 0 and quantity_found is None:
-                    continue
-
-                day_rule = rule["dias"]
-
-                if "habil" in clean:
-                    day_rule = "Hábiles"
-                elif "calendario" in clean:
-                    day_rule = "Calendario"
-
+            for candidate in classify(fragment):
                 rows.append(
                     {
                         "Documento": page.document,
                         "Página": page.page,
                         "Fragmento completo": fragment,
-                        "Clase de término": rule["clase"],
-                        "Régimen jurídico": rule["regimen"],
-                        "Norma sugerida": rule["norma"],
-                        "Artículo": rule["articulo"],
-                        "Cantidad": (
-                            quantity_found
-                            if quantity_found is not None
-                            else rule["cantidad"]
-                        ),
-                        "Unidad": (
-                            unit_found
-                            if unit_found is not None
-                            else rule["unidad"]
-                        ),
-                        "Tipo de días": day_rule,
-                        "Hecho inicial sugerido": rule["inicio"],
-                        "Seguridad preliminar": min(
-                            95,
-                            55 + hits * 15
-                            if quantity_found is not None
-                            else 35 + hits * 20,
-                        ),
-                        "Advertencia jurídica": rule["advertencia"],
-                        "Fecha inicial confirmada": None,
-                        "Hora inicial": time(8, 0),
+                        **candidate,
+                        "Actuación indicada después del vencimiento": after_expiry,
+                        "Fecha de notificación confirmada": None,
+                        "Hora de notificación": time(8, 0),
+                        "Regla de inicio": "Comienza al día siguiente",
                         "Aplicar cálculo": False,
                         "Conclusión revisada": "",
                     }
@@ -359,6 +325,7 @@ def detect(pages: list[PageTrace]) -> list[dict]:
             row["Fragmento completo"],
             row["Clase de término"],
         )
+
         if key not in seen:
             seen.add(key)
             unique.append(row)
@@ -366,34 +333,110 @@ def detect(pages: list[PageTrace]) -> list[dict]:
     return unique
 
 
-def calculate(start, quantity, unit, day_rule, excluded):
-    if unit == "Horas":
-        return start + timedelta(hours=int(quantity))
+def next_business_day(value: datetime, excluded: set[date]) -> datetime:
+    current = value
 
-    if day_rule == "Calendario":
-        return start + timedelta(days=int(quantity))
-
-    current = start
-    count = 0
-
-    while count < int(quantity):
+    while current.weekday() >= 5 or current.date() in excluded:
         current += timedelta(days=1)
-        if current.weekday() < 5 and current.date() not in excluded:
-            count += 1
 
     return current
 
 
-def semaphore(deadline):
+def calculate_deadline(
+    notification: datetime,
+    quantity: int,
+    unit: str,
+    day_rule: str,
+    start_rule: str,
+    excluded: set[date],
+) -> tuple[datetime, datetime]:
+    if start_rule == "Comienza al día siguiente":
+        start = notification + timedelta(days=1)
+    else:
+        start = notification
+
+    if unit == "Horas":
+        return start, start + timedelta(hours=quantity)
+
+    if day_rule == "Calendario":
+        return start, start + timedelta(days=max(quantity - 1, 0))
+
+    start = next_business_day(start, excluded)
+    current = start
+    counted = 1
+
+    while counted < quantity:
+        current += timedelta(days=1)
+
+        if current.weekday() < 5 and current.date() not in excluded:
+            counted += 1
+
+    return start, current
+
+
+def status(deadline: datetime) -> tuple[str, str, float]:
     hours = (deadline - datetime.now()).total_seconds() / 3600
 
     if hours < 0:
-        return "Rojo", "Vencido"
+        return "Rojo", "Vencido", hours
     if hours <= 24:
-        return "Rojo", "Urgente"
+        return "Rojo", "Urgente", hours
     if hours <= 72:
-        return "Amarillo", "Próximo"
-    return "Verde", "En plazo"
+        return "Amarillo", "Próximo", hours
+
+    return "Verde", "En plazo", hours
+
+
+def continuation(
+    row: pd.Series,
+    deadline_state: str,
+) -> str:
+    required = str(row.get("Actuación exigida", ""))
+    after_expiry = str(
+        row.get(
+            "Actuación indicada después del vencimiento",
+            "",
+        )
+    )
+
+    if deadline_state != "Vencido":
+        return (
+            f"Esperar el vencimiento y verificar si se presentó: {required}. "
+            "Mientras tanto, revisar el expediente y preparar observaciones."
+        )
+
+    if after_expiry:
+        return (
+            f"Verificar que el despacho ejecute lo ordenado después del vencimiento: "
+            f"{after_expiry}. Solicitar copia de la respuesta presentada y constancia "
+            "de la actuación posterior."
+        )
+
+    clean = norm(required)
+
+    if "informe" in clean or "dictamen" in clean:
+        return (
+            "Consultar si el informe o dictamen fue presentado. Si existe, solicitar copia "
+            "y pronunciarse sobre su suficiencia. Si no existe, solicitar al juzgado que "
+            "continúe el trámite, requiera el cumplimiento y adopte las medidas procedentes."
+        )
+
+    if "cumplimiento" in clean:
+        return (
+            "Solicitar verificación material del cumplimiento. Si continúa el incumplimiento, "
+            "pedir medidas de cumplimiento y la continuación del incidente de desacato."
+        )
+
+    if "respuesta" in clean:
+        return (
+            "Verificar si se respondió de fondo. Si no hubo respuesta, preparar requerimiento, "
+            "tutela o actuación procesal según el régimen identificado."
+        )
+
+    return (
+        "Solicitar constancia de vencimiento, revisar si la parte obligada actuó y pedir "
+        "que el despacho continúe con la etapa procesal correspondiente."
+    )
 
 
 with st.sidebar:
@@ -414,16 +457,13 @@ uploaded = st.file_uploader(
 )
 
 if not uploaded:
-    st.info(
-        "Puedes subir autos, fallos, derechos de petición, actos administrativos, "
-        "recursos, notificaciones y constancias."
-    )
+    st.info("Sube un auto, fallo, requerimiento, notificación o constancia.")
     st.stop()
 
 
 content = uploaded.getvalue()
 
-with st.spinner("Analizando el documento..."):
+with st.spinner("Analizando término, vencimiento y actuación posterior..."):
     raw = cached_load(
         uploaded.name,
         digest(content),
@@ -433,13 +473,13 @@ with st.spinner("Analizando el documento..."):
         max_pages,
         dpi,
     )
-    pages = [restore(x) for x in raw]
+    pages = [restore(item) for item in raw]
     rows = detect(pages)
 
 
 if not rows:
     st.warning(
-        "No se encontró una coincidencia suficiente. "
+        "No se encontró un término expreso con las reglas actuales. "
         "Esto no demuestra que el documento no contenga términos."
     )
     st.stop()
@@ -460,15 +500,27 @@ edited = st.data_editor(
         ),
         "Tipo de días": st.column_config.SelectboxColumn(
             "Tipo de días",
-            options=["Hábiles", "Calendario", "Por confirmar"],
+            options=[
+                "Hábiles",
+                "Calendario",
+                "Horas continuas o por confirmar",
+                "Por confirmar",
+            ],
         ),
-        "Fecha inicial confirmada": st.column_config.DateColumn(
-            "Fecha inicial confirmada",
+        "Fecha de notificación confirmada": st.column_config.DateColumn(
+            "Fecha de notificación confirmada",
             format="YYYY-MM-DD",
         ),
-        "Hora inicial": st.column_config.TimeColumn(
-            "Hora inicial",
+        "Hora de notificación": st.column_config.TimeColumn(
+            "Hora de notificación",
             format="HH:mm",
+        ),
+        "Regla de inicio": st.column_config.SelectboxColumn(
+            "Regla de inicio",
+            options=[
+                "Comienza al día siguiente",
+                "Comienza el mismo día",
+            ],
         ),
         "Seguridad preliminar": st.column_config.ProgressColumn(
             "Seguridad preliminar",
@@ -477,18 +529,18 @@ edited = st.data_editor(
             format="%d",
         ),
         "Aplicar cálculo": st.column_config.CheckboxColumn(
-            "Aplicar cálculo",
+            "Calcular",
         ),
         "Conclusión revisada": st.column_config.TextColumn(
             "Conclusión revisada",
             width="large",
         ),
     },
-    key="legal_term_editor",
+    key="expiry_action_editor",
 )
 
 
-st.subheader("Explicación jurídica preliminar")
+st.subheader("Explicación del documento")
 
 for index, row in edited.iterrows():
     with st.expander(
@@ -496,25 +548,25 @@ for index, row in edited.iterrows():
         f"{row['Documento']}, página {row['Página']}",
         expanded=index == 0,
     ):
-        st.markdown(f"**Fragmento:** {row['Fragmento completo']}")
-        st.markdown(f"**Régimen:** {row['Régimen jurídico']}")
+        st.markdown(f"**Texto detectado:** {row['Fragmento completo']}")
         st.markdown(
-            f"**Norma sugerida:** {row['Norma sugerida']}, {row['Artículo']}"
+            f"**Término:** {row['Cantidad']} {str(row['Unidad']).lower()} "
+            f"— {row['Carácter']}"
+        )
+        st.markdown(f"**Actuación exigida:** {row['Actuación exigida']}")
+        st.markdown(
+            f"**Después del vencimiento:** "
+            f"{row['Actuación indicada después del vencimiento'] or 'No se detectó instrucción expresa.'}"
         )
         st.markdown(
-            f"**Cantidad:** {row['Cantidad']} {str(row['Unidad']).lower()}"
+            f"**Norma sugerida:** {row['Norma sugerida']} — {row['Artículo']}"
         )
-        st.markdown(f"**Tipo de días:** {row['Tipo de días']}")
-        st.markdown(
-            f"**Hecho inicial sugerido:** {row['Hecho inicial sugerido']}"
-        )
-        st.warning(row["Advertencia jurídica"])
 
 
-st.subheader("Cálculo confirmado")
+st.subheader("Calcular vencimiento y actuación siguiente")
 
 excluded_text = st.text_area(
-    "Fechas excluidas adicionales",
+    "Festivos o fechas excluidas",
     placeholder="Una por línea: AAAA-MM-DD",
     height=90,
 )
@@ -547,77 +599,105 @@ if st.button(
             if not bool(row["Aplicar cálculo"]):
                 continue
 
-            start_date = row["Fecha inicial confirmada"]
+            notification_date = row["Fecha de notificación confirmada"]
 
-            if pd.isna(start_date):
+            if pd.isna(notification_date):
                 st.warning(
-                    f"Falta confirmar la fecha inicial de: {row['Clase de término']}."
+                    f"Falta la fecha de notificación de: {row['Clase de término']}."
                 )
                 continue
 
             if row["Tipo de días"] == "Por confirmar":
                 st.warning(
-                    f"Falta confirmar el tipo de días de: {row['Clase de término']}."
+                    f"Confirma si el término usa días hábiles o calendario: "
+                    f"{row['Clase de término']}."
                 )
                 continue
 
-            if int(row["Cantidad"]) <= 0:
-                st.warning(
-                    f"Falta confirmar la cantidad de: {row['Clase de término']}."
-                )
-                continue
+            if isinstance(notification_date, pd.Timestamp):
+                notification_date = notification_date.date()
 
-            if isinstance(start_date, pd.Timestamp):
-                start_date = start_date.date()
+            notification_time = row["Hora de notificación"]
 
-            start_time = row["Hora inicial"]
+            if pd.isna(notification_time):
+                notification_time = time(8, 0)
 
-            if pd.isna(start_time):
-                start_time = time(8, 0)
-
-            start = datetime.combine(start_date, start_time)
-            deadline = calculate(
-                start,
-                row["Cantidad"],
-                row["Unidad"],
-                row["Tipo de días"],
-                excluded,
+            notification = datetime.combine(
+                notification_date,
+                notification_time,
             )
 
-            color, status = semaphore(deadline)
+            day_rule = (
+                "Hábiles"
+                if row["Tipo de días"] == "Horas continuas o por confirmar"
+                else row["Tipo de días"]
+            )
+
+            start, deadline = calculate_deadline(
+                notification=notification,
+                quantity=int(row["Cantidad"]),
+                unit=row["Unidad"],
+                day_rule=day_rule,
+                start_rule=row["Regla de inicio"],
+                excluded=excluded,
+            )
+
+            color, deadline_state, remaining_hours = status(deadline)
 
             results.append(
                 {
-                    "Clase de término": row["Clase de término"],
                     "Documento": row["Documento"],
                     "Página": row["Página"],
-                    "Norma sugerida": (
-                        f"{row['Norma sugerida']}, {row['Artículo']}"
-                    ),
-                    "Fecha inicial": start,
+                    "Clase de término": row["Clase de término"],
+                    "Actuación exigida": row["Actuación exigida"],
+                    "Fecha de notificación": notification,
+                    "Inicio del cómputo": start,
                     "Vencimiento estimado": deadline,
                     "Semáforo": color,
-                    "Estado": status,
-                    "Advertencia": row["Advertencia jurídica"],
+                    "Estado": deadline_state,
+                    "Horas restantes": round(remaining_hours, 1),
+                    "Actuación que puede continuar": continuation(
+                        row,
+                        deadline_state,
+                    ),
+                    "Advertencia": (
+                        "Confirmar festivos, horario judicial, forma de notificación "
+                        "y cualquier regla especial."
+                    ),
                 }
             )
 
         if results:
             result_df = pd.DataFrame(results)
+            st.session_state["expiry_action_results"] = result_df
+
             st.dataframe(
                 result_df,
                 use_container_width=True,
                 hide_index=True,
             )
-            st.session_state["legal_term_results"] = result_df
+
+            for _, result in result_df.iterrows():
+                icon = {
+                    "Rojo": "🔴",
+                    "Amarillo": "🟡",
+                    "Verde": "🟢",
+                }[result["Semáforo"]]
+
+                st.info(
+                    f"{icon} **Vencimiento:** {result['Vencimiento estimado']}\n\n"
+                    f"**Estado:** {result['Estado']}\n\n"
+                    f"**Actuación que puede continuar:** "
+                    f"{result['Actuación que puede continuar']}"
+                )
         else:
-            st.info("No hay términos confirmados para calcular.")
+            st.info("No seleccionaste un término listo para calcular.")
 
 
 st.subheader("Exportar")
 
-calculated = st.session_state.get(
-    "legal_term_results",
+results_df = st.session_state.get(
+    "expiry_action_results",
     pd.DataFrame(),
 )
 
@@ -626,20 +706,19 @@ excel = io.BytesIO()
 with pd.ExcelWriter(excel, engine="openpyxl") as writer:
     edited.to_excel(
         writer,
-        sheet_name="Análisis legal",
+        sheet_name="Términos detectados",
         index=False,
     )
-    calculated.to_excel(
+    results_df.to_excel(
         writer,
-        sheet_name="Cálculos",
+        sheet_name="Vencimientos y actuación",
         index=False,
     )
 
 st.download_button(
-    "Descargar análisis legal en Excel",
+    "Descargar análisis en Excel",
     data=excel.getvalue(),
-    file_name="analisis_legal_terminos_colombia.xlsx",
+    file_name="terminos_vencimientos_actuaciones.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     use_container_width=True,
 )
-
