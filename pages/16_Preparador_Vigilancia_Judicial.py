@@ -596,7 +596,7 @@ groups: dict[str, dict[str, bytes]] = defaultdict(dict)
 
 if upload_mode == "Carpeta completa":
     st.info(
-        "Pulsa «Examinar archivos» y selecciona una carpeta. "
+        "Pulsa «Examinar archivos» y selecciona una carpeta. Espera hasta que terminen de cargarse todos los archivos y desaparezcan los iconos rojos. "
         "La aplicación cargará automáticamente los archivos compatibles "
         "que estén dentro de esa carpeta y sus subcarpetas."
     )
@@ -609,6 +609,48 @@ if upload_mode == "Carpeta completa":
     )
 
     if not folder_files:
+        st.stop()
+
+    total_bytes = sum(
+        uploaded.size
+        for uploaded in folder_files
+    )
+    total_mb = total_bytes / (1024 * 1024)
+
+    st.success(
+        f"Se seleccionaron {len(folder_files)} archivo(s), "
+        f"con un tamaño total aproximado de {total_mb:.1f} MB."
+    )
+
+    if total_mb > 900:
+        st.error(
+            "La carpeta supera aproximadamente 900 MB. "
+            "Divídela en dos cargas para evitar que el navegador interrumpa el envío."
+        )
+        st.stop()
+
+    invalid_files = [
+        uploaded.name
+        for uploaded in folder_files
+        if uploaded.size == 0
+    ]
+
+    if invalid_files:
+        st.warning(
+            "Algunos archivos llegaron vacíos o no pudieron cargarse: "
+            + ", ".join(invalid_files[:10])
+        )
+
+    folder_files = [
+        uploaded
+        for uploaded in folder_files
+        if uploaded.size > 0
+    ]
+
+    if not folder_files:
+        st.error(
+            "Ningún archivo pudo cargarse correctamente."
+        )
         st.stop()
 
     folder_rows = []
@@ -1038,5 +1080,6 @@ st.warning(
     "despacho, proceso, partes, hecho generador y descripción. "
     "El envío debe realizarlo personalmente el usuario en el portal oficial."
 )
+
 
 
