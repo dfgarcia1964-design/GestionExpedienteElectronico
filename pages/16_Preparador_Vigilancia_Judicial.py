@@ -580,108 +580,210 @@ with st.sidebar:
     )
 
 
-st.subheader("1. Escoger directamente los documentos")
+st.subheader("1. Escoger una carpeta completa o archivos individuales")
 
-st.info(
-    "Selecciona todos los archivos que quieras analizar. "
-    "No necesitas crear un ZIP. Después podrás indicar a qué expediente "
-    "o carpeta pertenece cada documento."
+upload_mode = st.radio(
+    "¿Qué deseas seleccionar?",
+    options=[
+        "Carpeta completa",
+        "Archivo individual o varios archivos",
+    ],
+    horizontal=True,
 )
-
-uploaded_files = st.file_uploader(
-    "Escoge los documentos",
-    type=["pdf", "docx", "txt", "jpg", "jpeg", "png", "eml"],
-    accept_multiple_files=True,
-)
-
-if not uploaded_files:
-    st.stop()
-
-
-file_rows = []
-
-for index, uploaded in enumerate(uploaded_files, start=1):
-    proposed_folder = re.sub(
-        r"[_\-]+",
-        " ",
-        PurePosixPath(uploaded.name).stem,
-    ).strip()
-
-    file_rows.append(
-        {
-            "Usar": True,
-            "Documento": uploaded.name,
-            "Expediente o carpeta": "Expediente 1",
-            "Nombre sugerido": proposed_folder,
-            "Orden": index,
-        }
-    )
-
-
-st.markdown("### Organizar los documentos por expediente")
-
-st.caption(
-    "En la columna «Expediente o carpeta» escribe el mismo nombre "
-    "para todos los documentos que pertenecen al mismo proceso."
-)
-
-organization_df = st.data_editor(
-    pd.DataFrame(file_rows),
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "Usar": st.column_config.CheckboxColumn(
-            "Usar",
-        ),
-        "Documento": st.column_config.TextColumn(
-            "Documento",
-            disabled=True,
-            width="large",
-        ),
-        "Expediente o carpeta": st.column_config.TextColumn(
-            "Expediente o carpeta",
-            width="large",
-            required=True,
-        ),
-        "Nombre sugerido": st.column_config.TextColumn(
-            "Nombre sugerido",
-            disabled=True,
-        ),
-        "Orden": st.column_config.NumberColumn(
-            "Orden",
-            min_value=1,
-            step=1,
-        ),
-    },
-    key="document_organization",
-)
-
-
-uploaded_by_name = {
-    uploaded.name: uploaded
-    for uploaded in uploaded_files
-}
 
 groups: dict[str, dict[str, bytes]] = defaultdict(dict)
 
-for _, row in organization_df.iterrows():
-    if not bool(row["Usar"]):
-        continue
 
-    document_name = str(row["Documento"])
-    folder_name = str(
-        row["Expediente o carpeta"]
-    ).strip()
+if upload_mode == "Carpeta completa":
+    st.info(
+        "Pulsa «Examinar archivos» y selecciona una carpeta. "
+        "La aplicación cargará automáticamente los archivos compatibles "
+        "que estén dentro de esa carpeta y sus subcarpetas."
+    )
 
-    if not folder_name:
-        folder_name = "Sin clasificar"
+    folder_files = st.file_uploader(
+        "Seleccionar carpeta completa",
+        type=["pdf", "docx", "txt", "jpg", "jpeg", "png", "eml"],
+        accept_multiple_files="directory",
+        key="vigilancia_folder_uploader",
+    )
 
-    uploaded = uploaded_by_name.get(document_name)
+    if not folder_files:
+        st.stop()
 
-    if uploaded is None:
-        continue
+    folder_rows = []
 
-    groups[folder_name][document_name] = uploaded.getvalue()
+    for index, uploaded in enumerate(folder_files, start=1):
+        normalized_path = uploaded.name.replace("\\", "/")
+        path = PurePosixPath(normalized_path)
+        parts = path.parts
+
+        if len(parts) > 1:
+            expediente = parts[0]
+            relative_name = "/".join(parts[1:])
+        else:
+            expediente = "Carpeta seleccionada"
+            relative_name = path.name
+
+        folder_rows.append(
+            {
+                "Usar": True,
+                "Ruta dentro de la carpeta": normalized_path,
+                "Documento": path.name,
+                "Expediente o carpeta": expediente,
+                "Orden": index,
+            }
+        )
+
+    st.markdown("### Archivos encontrados en la carpeta")
+
+    folder_df = st.data_editor(
+        pd.DataFrame(folder_rows),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Usar": st.column_config.CheckboxColumn("Usar"),
+            "Ruta dentro de la carpeta": st.column_config.TextColumn(
+                "Ruta dentro de la carpeta",
+                disabled=True,
+                width="large",
+            ),
+            "Documento": st.column_config.TextColumn(
+                "Documento",
+                disabled=True,
+                width="large",
+            ),
+            "Expediente o carpeta": st.column_config.TextColumn(
+                "Expediente o carpeta",
+                width="large",
+                required=True,
+            ),
+            "Orden": st.column_config.NumberColumn(
+                "Orden",
+                min_value=1,
+                step=1,
+            ),
+        },
+        key="folder_organization",
+    )
+
+    uploaded_by_path = {
+        uploaded.name.replace("\\", "/"): uploaded
+        for uploaded in folder_files
+    }
+
+    for _, row in folder_df.iterrows():
+        if not bool(row["Usar"]):
+            continue
+
+        upload_path = str(row["Ruta dentro de la carpeta"])
+        expediente = str(row["Expediente o carpeta"]).strip()
+
+        if not expediente:
+            expediente = "Carpeta seleccionada"
+
+        uploaded = uploaded_by_path.get(upload_path)
+
+        if uploaded is None:
+            continue
+
+        document_key = upload_path
+
+        # Evita reemplazar archivos con el mismo nombre.
+        if document_key in groups[expediente]:
+            document_key = (
+                f"{row['Orden']}_{PurePosixPath(upload_path).name}"
+            )
+
+        groups[expediente][document_key] = uploaded.getvalue()
+
+
+else:
+    st.info(
+        "Selecciona un archivo, o mantén presionada la tecla Ctrl "
+        "para escoger varios archivos."
+    )
+
+    uploaded_files = st.file_uploader(
+        "Seleccionar archivo individual o varios archivos",
+        type=["pdf", "docx", "txt", "jpg", "jpeg", "png", "eml"],
+        accept_multiple_files=True,
+        key="vigilancia_individual_uploader",
+    )
+
+    if not uploaded_files:
+        st.stop()
+
+    file_rows = []
+
+    for index, uploaded in enumerate(uploaded_files, start=1):
+        file_rows.append(
+            {
+                "Usar": True,
+                "Documento": uploaded.name,
+                "Expediente o carpeta": "Expediente 1",
+                "Orden": index,
+            }
+        )
+
+    st.markdown("### Organizar archivos por expediente")
+
+    st.caption(
+        "Escribe el mismo nombre en «Expediente o carpeta» para todos "
+        "los archivos que pertenezcan al mismo proceso."
+    )
+
+    organization_df = st.data_editor(
+        pd.DataFrame(file_rows),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Usar": st.column_config.CheckboxColumn("Usar"),
+            "Documento": st.column_config.TextColumn(
+                "Documento",
+                disabled=True,
+                width="large",
+            ),
+            "Expediente o carpeta": st.column_config.TextColumn(
+                "Expediente o carpeta",
+                width="large",
+                required=True,
+            ),
+            "Orden": st.column_config.NumberColumn(
+                "Orden",
+                min_value=1,
+                step=1,
+            ),
+        },
+        key="individual_organization",
+    )
+
+    uploaded_by_name = {
+        uploaded.name: uploaded
+        for uploaded in uploaded_files
+    }
+
+    for _, row in organization_df.iterrows():
+        if not bool(row["Usar"]):
+            continue
+
+        document_name = str(row["Documento"])
+        expediente = str(row["Expediente o carpeta"]).strip()
+
+        if not expediente:
+            expediente = "Sin clasificar"
+
+        uploaded = uploaded_by_name.get(document_name)
+
+        if uploaded is None:
+            continue
+
+        document_key = document_name
+
+        if document_key in groups[expediente]:
+            document_key = f"{row['Orden']}_{document_name}"
+
+        groups[expediente][document_key] = uploaded.getvalue()
 
 
 if not groups:
@@ -691,9 +793,14 @@ if not groups:
     st.stop()
 
 
+total_documents = sum(
+    len(files)
+    for files in groups.values()
+)
+
 st.success(
-    f"Se organizaron {len(uploaded_files)} documento(s) "
-    f"en {len(groups)} expediente(s)."
+    f"Se seleccionaron {total_documents} documento(s) "
+    f"en {len(groups)} expediente(s) o carpeta(s)."
 )
 
 
@@ -931,4 +1038,5 @@ st.warning(
     "despacho, proceso, partes, hecho generador y descripción. "
     "El envío debe realizarlo personalmente el usuario en el portal oficial."
 )
+
 
