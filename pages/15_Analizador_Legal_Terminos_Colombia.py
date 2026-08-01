@@ -870,22 +870,20 @@ st.warning(
 )
 
 
-def document_date_from_pages(pages: list[PageTrace]) -> tuple[date | None, str]:
-    full_text = "\n".join(page.text for page in pages)
+def document_date_from_pages(
+    pages: list[PageTrace],
+) -> tuple[date | None, str]:
+    """
+    Detecta fechas como:
+    - 29/07/2026
+    - 29 de julio de 2026
+    - Veintinueve (29) de julio de dos mil veintiséis (2026)
+    """
+    full_text = "\n".join(
+        page.text
+        for page in pages
+    )
     clean = norm(full_text)
-
-    numeric_dates = []
-
-    for day, month, year in re.findall(
-        r"\b([0-3]?\d)[/-]([01]?\d)[/-]((?:19|20)\d{2})\b",
-        clean,
-    ):
-        try:
-            numeric_dates.append(
-                date(int(year), int(month), int(day))
-            )
-        except ValueError:
-            pass
 
     months = {
         "enero": 1,
@@ -902,40 +900,139 @@ def document_date_from_pages(pages: list[PageTrace]) -> tuple[date | None, str]:
         "diciembre": 12,
     }
 
-    textual_pattern = (
-        r"\b([0-3]?\d)\s+de\s+("
+    candidates: list[tuple[date, str, int]] = []
+
+    # Formato judicial:
+    # "Veintinueve (29) de julio de dos mil veintiséis (2026)"
+    judicial_pattern = (
+        r"\b[a-z\s-]{0,35}\((?P<day>[0-3]?\d)\)\s+de\s+"
+        r"(?P<month>"
         + "|".join(months.keys())
-        + r")\s+de\s+((?:19|20)\d{2})\b"
+        + r")\s+de\s+[a-z\s-]{0,60}"
+        r"\((?P<year>(?:19|20)\d{2})\)"
     )
 
-    textual_dates = []
-
-    for day, month_name, year in re.findall(
-        textual_pattern,
+    for match in re.finditer(
+        judicial_pattern,
         clean,
     ):
         try:
-            textual_dates.append(
-                date(
-                    int(year),
-                    months[month_name],
-                    int(day),
+            value = date(
+                int(match.group("year")),
+                months[match.group("month")],
+                int(match.group("day")),
+            )
+            candidates.append(
+                (
+                    value,
+                    "Fecha judicial escrita en letras y confirmada entre paréntesis",
+                    match.start(),
                 )
             )
         except ValueError:
             pass
 
-    detected_dates = textual_dates + numeric_dates
+    # Variante:
+    # "veintinueve (29) de julio de 2026"
+    mixed_pattern = (
+        r"\b[a-z\s-]{0,35}\((?P<day>[0-3]?\d)\)\s+de\s+"
+        r"(?P<month>"
+        + "|".join(months.keys())
+        + r")\s+de\s+(?P<year>(?:19|20)\d{2})\b"
+    )
 
-    if detected_dates:
+    for match in re.finditer(
+        mixed_pattern,
+        clean,
+    ):
+        try:
+            value = date(
+                int(match.group("year")),
+                months[match.group("month")],
+                int(match.group("day")),
+            )
+            candidates.append(
+                (
+                    value,
+                    "Fecha escrita en letras con día numérico entre paréntesis",
+                    match.start(),
+                )
+            )
+        except ValueError:
+            pass
+
+    # Formato normal: "29 de julio de 2026"
+    textual_pattern = (
+        r"\b(?P<day>[0-3]?\d)\s+de\s+"
+        r"(?P<month>"
+        + "|".join(months.keys())
+        + r")\s+de\s+(?P<year>(?:19|20)\d{2})\b"
+    )
+
+    for match in re.finditer(
+        textual_pattern,
+        clean,
+    ):
+        try:
+            value = date(
+                int(match.group("year")),
+                months[match.group("month")],
+                int(match.group("day")),
+            )
+            candidates.append(
+                (
+                    value,
+                    "Fecha textual localizada en el escrito",
+                    match.start(),
+                )
+            )
+        except ValueError:
+            pass
+
+    # Formatos numéricos.
+    numeric_patterns = [
+        r"\b(?P<day>[0-3]?\d)[/-](?P<month>[01]?\d)[/-](?P<year>(?:19|20)\d{2})\b",
+        r"\b(?P<year>(?:19|20)\d{2})[-/](?P<month>[01]?\d)[-/](?P<day>[0-3]?\d)\b",
+    ]
+
+    for pattern in numeric_patterns:
+        for match in re.finditer(
+            pattern,
+            clean,
+        ):
+            try:
+                value = date(
+                    int(match.group("year")),
+                    int(match.group("month")),
+                    int(match.group("day")),
+                )
+                candidates.append(
+                    (
+                        value,
+                        "Fecha numérica localizada en el escrito",
+                        match.start(),
+                    )
+                )
+            except ValueError:
+                pass
+
+    if not candidates:
         return (
-            detected_dates[0],
-            "Fecha principal localizada en el encabezado o cuerpo del escrito",
+            None,
+            "No fue posible identificar automáticamente la fecha del escrito",
         )
 
+    # Preferimos la primera fecha ubicada en el documento,
+    # que normalmente corresponde al encabezado.
+    candidates.sort(
+        key=lambda item: item[2]
+    )
+
+    selected_date, reason, _ = candidates[0]
+
     return (
-        None,
-        "No fue posible identificar automáticamente la fecha del escrito",
+        selected_date,
+        reason,
     )
 
 
@@ -1092,5 +1189,6 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     use_container_width=True,
 )
+
 
 
