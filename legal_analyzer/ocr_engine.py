@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import io
 from dataclasses import dataclass
@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import pytesseract
 from pdf2image import convert_from_bytes
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
-from PyPDF2 import PdfReader
+from pdf_compat import PdfReader
 from pytesseract import Output
 
 from .models import PageTrace

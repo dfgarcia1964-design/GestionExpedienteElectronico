@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import io
@@ -13,7 +13,7 @@ from docx import Document
 from docx.shared import Pt
 from pdf2image import convert_from_bytes
 from PIL import ImageEnhance, ImageFilter, ImageOps
-from PyPDF2 import PdfReader
+from pdf_compat import PdfReader
 from pytesseract import Output
 
 

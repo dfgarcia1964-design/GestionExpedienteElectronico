@@ -1,5 +1,5 @@
 import os
-import PyPDF2
+from pdf_compat import PdfReader
 import docx
 import openpyxl
 from PIL import Image
@@ -37,7 +37,7 @@ def get_pdf_pages(file_path):
     """
     try:
         with open(file_path, 'rb') as file:
-            pdf_reader = PyPDF2.PdfReader(file)
+            pdf_reader = PdfReader(file)
             return len(pdf_reader.pages)
     except:
         return 1  # Si no es un PDF o hay un error, asumimos 1 página
@@ -48,7 +48,7 @@ def get_pdf_metadata(file_path):
     """
     try:
         with open(file_path, 'rb') as file:
-            pdf_reader = PyPDF2.PdfReader(file)
+            pdf_reader = PdfReader(file)
             info = pdf_reader.metadata
             return {
                 'pages': len(pdf_reader.pages),
@@ -135,9 +135,15 @@ def is_document_digitalized(file_path):
     if file_type.startswith('application/pdf'):
         try:
             with open(file_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
-                if '/Producer' in pdf_reader.metadata:
-                    return 'scan' in pdf_reader.metadata['/Producer'].lower()
+                pdf_reader = PdfReader(file)
+                info = pdf_reader.metadata
+                producer = ""
+                if info:
+                    producer = getattr(info, "producer", None) or str(
+                        getattr(info, "/Producer", "") or ""
+                    )
+                if producer:
+                    return "scan" in producer.lower()
         except:
             pass
     return False  # Si no es un PDF o no se puede determinar, asumimos que es nativo electrónico

@@ -1,1 +1,1 @@
-﻿"""Motor jurídico modular para análisis de cumplimiento."""
+"""Motor jurídico modular para análisis de cumplimiento."""

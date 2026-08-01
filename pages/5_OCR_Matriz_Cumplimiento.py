@@ -1,4 +1,4 @@
-﻿import io
+import io
 import re
 import unicodedata
 from difflib import SequenceMatcher
@@ -11,7 +11,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
 from pdf2image import convert_from_bytes
-from PyPDF2 import PdfReader
+from pdf_compat import PdfReader
 
 
 st.set_page_config(

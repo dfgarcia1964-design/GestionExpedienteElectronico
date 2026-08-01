@@ -1,13 +1,9 @@
-﻿streamlit
+streamlit
 pandas
 openpyxl
-PyPDF2
 python-docx
 Pillow
 python-magic
-fpdf
-PyQt5
-xlwings
 openai
 plotly
 pytz

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import io
@@ -10,10 +10,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-try:
-    from pypdf import PdfReader, PdfWriter
-except ModuleNotFoundError:
-    from PyPDF2 import PdfReader, PdfWriter
+from pdf_compat import PdfReader, PdfWriter
 
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import getSampleStyleSheet
@@ -651,6 +648,7 @@ with tab_upload:
 
     if uploaded_files:
         st.success(f"Se cargaron {len(uploaded_files)} archivo(s).")
+        st.session_state["vigilancia_uploaded_files"] = uploaded_files
 
         uploaded_summary = pd.DataFrame(
             [
@@ -674,8 +672,10 @@ with tab_upload:
         )
 
 
-if "uploaded_files" not in locals() or not uploaded_files:
+if not st.session_state.get("vigilancia_uploaded_files"):
     st.stop()
+
+uploaded_files = st.session_state["vigilancia_uploaded_files"]
 
 
 raw_files = {}
@@ -900,12 +900,30 @@ with tab_review:
         )
 
 
+    st.session_state["vigilancia_export"] = {
+        "final_df": final_df,
+        "final_rows": final_rows,
+        "missing": missing,
+        "essential_df": essential_df,
+        "chronology_df": chronology_df,
+        "raw_files": raw_files,
+    }
+
+
 with tab_package:
     st.markdown("### Resumen final")
 
-    if "final_df" not in locals():
+    export = st.session_state.get("vigilancia_export")
+    if not export:
         st.warning("Revisa primero la clasificación.")
         st.stop()
+
+    final_df = export["final_df"]
+    final_rows = export["final_rows"]
+    missing = export["missing"]
+    essential_df = export["essential_df"]
+    chronology_df = export["chronology_df"]
+    raw_files = export["raw_files"]
 
     summary_cols = st.columns(4)
     summary_cols[0].metric("Archivos incluidos", len(final_df))
