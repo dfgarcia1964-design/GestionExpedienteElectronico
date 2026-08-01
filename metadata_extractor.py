@@ -1,9 +1,9 @@
 import os
+import mimetypes
 from pdf_compat import PdfReader
 import docx
 import openpyxl
 from PIL import Image
-import magic
 from datetime import datetime
 
 def get_file_metadata(file_path):
@@ -109,8 +109,14 @@ def get_file_type(file_path):
     """
     Obtiene el tipo MIME del archivo.
     """
-    mime = magic.Magic(mime=True)
-    return mime.from_file(file_path)
+    try:
+        import magic
+
+        mime = magic.Magic(mime=True)
+        return mime.from_file(file_path)
+    except (ImportError, OSError, AttributeError):
+        mime_type, _ = mimetypes.guess_type(file_path)
+        return mime_type or "application/octet-stream"
 
 def format_file_size(size):
     """

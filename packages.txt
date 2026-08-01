@@ -1,4 +1,5 @@
 libmagic1t64
+libmagic1
 poppler-utils
 tesseract-ocr
 tesseract-ocr-spa

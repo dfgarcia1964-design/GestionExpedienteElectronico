@@ -85,10 +85,16 @@ cd GestionExpedienteElectronico
   ```
 
 4. Instalar las dependencias:
+
+Para la versión web (Streamlit):
 ```
 pip install --upgrade pip
-pip install watchdog
 pip install -r requirements.txt
+```
+
+Para la versión de escritorio (PyQt5 y xlwings):
+```
+pip install -r requirements-desktop.txt
 ```
 
 ## Uso
@@ -99,7 +105,7 @@ python app.py
 ```
 Para ejecutar la versión web:
 ```
-streamlit run 🏠_Inicio.py.py
+streamlit run "🏠_Inicio.py"
 ```
 Siga las instrucciones en la interfaz de usuario para cargar y procesar los expedientes.
 
