@@ -861,135 +861,198 @@ for index, row in edited.iterrows():
         )
 
 
-st.subheader("Calcular vencimiento y actuación siguiente")
+st.subheader("Vencimiento y actuación siguiente — cálculo automático")
 
-excluded_text = st.text_area(
-    "Festivos o fechas excluidas",
-    placeholder="Una por línea: AAAA-MM-DD",
-    height=90,
+st.warning(
+    "El sistema usa automáticamente la fecha del escrito como fecha base. "
+    "Este resultado es estimado: jurídicamente el término puede comenzar con "
+    "la notificación, recepción, ejecutoria o una regla especial."
 )
 
-if st.button(
-    "Calcular términos seleccionados",
-    type="primary",
-    use_container_width=True,
-):
-    excluded = set()
-    invalid = []
 
-    for line in excluded_text.splitlines():
-        value = line.strip()
+def document_date_from_pages(pages: list[PageTrace]) -> tuple[date | None, str]:
+    full_text = "\n".join(page.text for page in pages)
+    clean = norm(full_text)
 
-        if not value:
+    numeric_dates = []
+
+    for day, month, year in re.findall(
+        r"\b([0-3]?\d)[/-]([01]?\d)[/-]((?:19|20)\d{2})\b",
+        clean,
+    ):
+        try:
+            numeric_dates.append(
+                date(int(year), int(month), int(day))
+            )
+        except ValueError:
+            pass
+
+    months = {
+        "enero": 1,
+        "febrero": 2,
+        "marzo": 3,
+        "abril": 4,
+        "mayo": 5,
+        "junio": 6,
+        "julio": 7,
+        "agosto": 8,
+        "septiembre": 9,
+        "octubre": 10,
+        "noviembre": 11,
+        "diciembre": 12,
+    }
+
+    textual_pattern = (
+        r"\b([0-3]?\d)\s+de\s+("
+        + "|".join(months.keys())
+        + r")\s+de\s+((?:19|20)\d{2})\b"
+    )
+
+    textual_dates = []
+
+    for day, month_name, year in re.findall(
+        textual_pattern,
+        clean,
+    ):
+        try:
+            textual_dates.append(
+                date(
+                    int(year),
+                    months[month_name],
+                    int(day),
+                )
+            )
+        except ValueError:
+            pass
+
+    detected_dates = textual_dates + numeric_dates
+
+    if detected_dates:
+        return (
+            detected_dates[0],
+            "Fecha principal localizada en el encabezado o cuerpo del escrito",
+        )
+
+    return (
+        None,
+        "No fue posible identificar automáticamente la fecha del escrito",
+    )
+
+
+document_date, document_date_reason = document_date_from_pages(pages)
+automatic_results = []
+
+if document_date is None:
+    st.error(
+        "No se encontró una fecha clara en el escrito. "
+        "El cálculo automático no puede realizarse."
+    )
+else:
+    st.success(
+        f"Fecha del escrito detectada automáticamente: "
+        f"{document_date:%d/%m/%Y}"
+    )
+    st.caption(document_date_reason)
+
+    for _, row in edited.iterrows():
+        quantity = int(row.get("Cantidad", 0))
+
+        if quantity <= 0:
             continue
 
-        try:
-            excluded.add(datetime.strptime(value, "%Y-%m-%d").date())
-        except ValueError:
-            invalid.append(value)
+        unit = str(row.get("Unidad", "Días"))
+        detected_day_rule = str(
+            row.get("Tipo de días", "Por confirmar")
+        )
 
-    if invalid:
-        st.error("Fechas inválidas: " + ", ".join(invalid))
-    else:
-        results = []
-
-        for _, row in edited.iterrows():
-            if not bool(row["Aplicar cálculo"]):
-                continue
-
-            notification_date = row["Fecha de notificación confirmada"]
-
-            if pd.isna(notification_date):
-                st.warning(
-                    f"Falta la fecha de notificación de: {row['Clase de término']}."
-                )
-                continue
-
-            if row["Tipo de días"] == "Por confirmar":
-                st.warning(
-                    f"Confirma si el término usa días hábiles o calendario: "
-                    f"{row['Clase de término']}."
-                )
-                continue
-
-            if isinstance(notification_date, pd.Timestamp):
-                notification_date = notification_date.date()
-
-            notification_time = row["Hora de notificación"]
-
-            if pd.isna(notification_time):
-                notification_time = time(8, 0)
-
-            notification = datetime.combine(
-                notification_date,
-                notification_time,
-            )
-
-            day_rule = (
-                "Hábiles"
-                if row["Tipo de días"] == "Horas continuas o por confirmar"
-                else row["Tipo de días"]
-            )
-
-            start, deadline = calculate_deadline(
-                notification=notification,
-                quantity=int(row["Cantidad"]),
-                unit=row["Unidad"],
-                day_rule=day_rule,
-                start_rule=row["Regla de inicio"],
-                excluded=excluded,
-            )
-
-            color, deadline_state, remaining_hours = status(deadline)
-
-            results.append(
-                {
-                    "Documento": row["Documento"],
-                    "Página": row["Página"],
-                    "Clase de término": row["Clase de término"],
-                    "Actuación exigida": row["Actuación exigida"],
-                    "Fecha de notificación": notification,
-                    "Inicio del cómputo": start,
-                    "Vencimiento estimado": deadline,
-                    "Semáforo": color,
-                    "Estado": deadline_state,
-                    "Horas restantes": round(remaining_hours, 1),
-                    "Actuación que puede continuar": continuation(
-                        row,
-                        deadline_state,
-                    ),
-                    "Advertencia": (
-                        "Confirmar festivos, horario judicial, forma de notificación "
-                        "y cualquier regla especial."
-                    ),
-                }
-            )
-
-        if results:
-            result_df = pd.DataFrame(results)
-            st.session_state["expiry_action_results"] = result_df
-
-            st.dataframe(
-                result_df,
-                use_container_width=True,
-                hide_index=True,
-            )
-
-            for _, result in result_df.iterrows():
-                icon = {
-                    "Rojo": "🔴",
-                    "Amarillo": "🟡",
-                    "Verde": "🟢",
-                }[result["Semáforo"]]
-
-                st.info(
-                    f"{icon} **Vencimiento:** {result['Vencimiento estimado']}\n\n"
-                    f"**Estado:** {result['Estado']}\n\n"
-                    f"**Actuación que puede continuar:** "
-                    f"{result['Actuación que puede continuar']}"
-                )
+        if unit == "Horas":
+            day_rule = "Hábiles"
+        elif detected_day_rule in {"Hábiles", "Calendario"}:
+            day_rule = detected_day_rule
         else:
-            st.info("No seleccionaste un término listo para calcular.")
+            day_rule = "Hábiles"
+
+        document_datetime = datetime.combine(
+            document_date,
+            time(8, 0),
+        )
+
+        start, deadline = calculate_deadline(
+            notification=document_datetime,
+            quantity=quantity,
+            unit=unit,
+            day_rule=day_rule,
+            start_rule="Comienza al día siguiente",
+            excluded=set(),
+        )
+
+        color, deadline_state, remaining_hours = status(deadline)
+
+        automatic_results.append(
+            {
+                "Documento": row.get("Documento", ""),
+                "Página": row.get("Página", ""),
+                "Clase de término": row.get("Clase de término", ""),
+                "Fecha del escrito usada": document_datetime,
+                "Inicio estimado": start,
+                "Cantidad": quantity,
+                "Unidad": unit,
+                "Regla automática": day_rule,
+                "Vencimiento estimado": deadline,
+                "Semáforo": color,
+                "Estado": deadline_state,
+                "Horas restantes": round(remaining_hours, 1),
+                "Actuación exigida": row.get(
+                    "Actuación exigida",
+                    "",
+                ),
+                "Actuación que puede continuar": continuation(
+                    row,
+                    deadline_state,
+                ),
+                "Advertencia": (
+                    "Cálculo efectuado con la fecha del escrito. "
+                    "Confirmar la fecha real de notificación antes de actuar."
+                ),
+            }
+        )
+
+    automatic_results_df = pd.DataFrame(
+        automatic_results
+    )
+
+    if automatic_results_df.empty:
+        st.warning(
+            "Se encontró la fecha del escrito, pero no un término completo para calcular."
+        )
+    else:
+        st.dataframe(
+            automatic_results_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        for _, result in automatic_results_df.iterrows():
+            icon = {
+                "Rojo": "🔴",
+                "Amarillo": "🟡",
+                "Verde": "🟢",
+            }.get(result["Semáforo"], "⚪")
+
+            st.info(
+                f"{icon} **{result['Clase de término']}**\n\n"
+                f"**Fecha del escrito usada:** "
+                f"{result['Fecha del escrito usada']:%d/%m/%Y}\n\n"
+                f"**Inicio estimado:** "
+                f"{result['Inicio estimado']:%d/%m/%Y %H:%M}\n\n"
+                f"**Vencimiento estimado:** "
+                f"{result['Vencimiento estimado']:%d/%m/%Y %H:%M}\n\n"
+                f"**Estado:** {result['Estado']}\n\n"
+                f"**Actuación siguiente:** "
+                f"{result['Actuación que puede continuar']}"
+            )
+
+        st.session_state["expiry_action_results"] = automatic_results_df
 
 
 st.subheader("Exportar")
@@ -1029,4 +1092,5 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     use_container_width=True,
 )
+
 
