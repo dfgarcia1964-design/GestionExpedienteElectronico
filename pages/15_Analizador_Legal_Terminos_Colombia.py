@@ -439,6 +439,260 @@ def continuation(
     )
 
 
+MONTHS_AUTO = {
+    "enero": 1,
+    "febrero": 2,
+    "marzo": 3,
+    "abril": 4,
+    "mayo": 5,
+    "junio": 6,
+    "julio": 7,
+    "agosto": 8,
+    "septiembre": 9,
+    "octubre": 10,
+    "noviembre": 11,
+    "diciembre": 12,
+}
+
+
+def extract_dates_from_text(text: str) -> list[date]:
+    """
+    Extrae fechas numéricas y fechas escritas en español.
+    """
+    values: list[date] = []
+    clean = norm(text)
+
+    for day, month, year in re.findall(
+        r"\b([0-3]?\d)[/-]([01]?\d)[/-]((?:19|20)\d{2})\b",
+        clean,
+    ):
+        try:
+            values.append(
+                date(int(year), int(month), int(day))
+            )
+        except ValueError:
+            pass
+
+    textual_pattern = (
+        r"\b([0-3]?\d)\s+de\s+("
+        + "|".join(MONTHS_AUTO.keys())
+        + r")\s+de\s+((?:19|20)\d{2})\b"
+    )
+
+    for day, month_name, year in re.findall(
+        textual_pattern,
+        clean,
+    ):
+        try:
+            values.append(
+                date(
+                    int(year),
+                    MONTHS_AUTO[month_name],
+                    int(day),
+                )
+            )
+        except ValueError:
+            pass
+
+    return list(dict.fromkeys(values))
+
+
+def detect_notification_date(full_text: str) -> tuple[date | None, str, int]:
+    """
+    Busca primero una fecha cercana a palabras de notificación o recepción.
+    Si no existe, usa la fecha principal del documento como estimación de baja confianza.
+    """
+    clean = norm(full_text)
+
+    notification_patterns = [
+        r"(?:notificado|notificacion|comunicado|recibido|recepcionado|enviado)"
+        r"[^\.]{0,180}",
+        r"(?:correo electronico|mensaje de datos)[^\.]{0,180}",
+    ]
+
+    for pattern in notification_patterns:
+        for match in re.finditer(pattern, clean):
+            fragment = match.group(0)
+            dates = extract_dates_from_text(fragment)
+
+            if dates:
+                return (
+                    dates[0],
+                    "Fecha localizada cerca de una expresión de notificación o recepción",
+                    85,
+                )
+
+    all_dates = extract_dates_from_text(full_text)
+
+    if all_dates:
+        return (
+            all_dates[0],
+            "Fecha principal del documento usada como estimación; confirmar notificación",
+            40,
+        )
+
+    return (
+        None,
+        "No se encontró una fecha utilizable",
+        0,
+    )
+
+
+def automatic_day_rule(
+    unit: str,
+    detected_rule: str,
+    fragment: str,
+) -> tuple[str, str]:
+    """
+    Aplica una regla automática conservadora.
+    """
+    clean = norm(fragment)
+
+    if unit == "Horas":
+        return (
+            "Horas continuas o por confirmar",
+            "El término está expresado en horas; confirmar si corre de forma continua.",
+        )
+
+    if detected_rule in {"Hábiles", "Calendario"}:
+        return (
+            detected_rule,
+            "La regla aparece expresamente o ya fue clasificada.",
+        )
+
+    if "habil" in clean:
+        return (
+            "Hábiles",
+            "El fragmento menciona días hábiles.",
+        )
+
+    if "calendario" in clean:
+        return (
+            "Calendario",
+            "El fragmento menciona días calendario.",
+        )
+
+    return (
+        "Hábiles",
+        "Regla automática provisional para actuación judicial; debe confirmarse.",
+    )
+
+
+def automatic_start_rule(fragment: str) -> tuple[str, str]:
+    clean = norm(fragment)
+
+    if "a partir del mismo dia" in clean or "desde hoy" in clean:
+        return (
+            "Comienza el mismo día",
+            "El texto parece ordenar inicio inmediato.",
+        )
+
+    return (
+        "Comienza al día siguiente",
+        "Regla automática provisional; confirmar con la notificación y la norma aplicable.",
+    )
+
+
+def build_automatic_results(
+    rows: list[dict],
+    pages: list[PageTrace],
+) -> pd.DataFrame:
+    full_text = "\n".join(page.text for page in pages)
+    notification_date, date_reason, date_confidence = detect_notification_date(
+        full_text
+    )
+
+    results = []
+
+    for row in rows:
+        fragment = str(row.get("Fragmento completo", ""))
+        day_rule, day_reason = automatic_day_rule(
+            str(row.get("Unidad", "Días")),
+            str(row.get("Tipo de días", "Por confirmar")),
+            fragment,
+        )
+        start_rule, start_reason = automatic_start_rule(fragment)
+
+        if notification_date is None:
+            results.append(
+                {
+                    "Documento": row.get("Documento", ""),
+                    "Página": row.get("Página", ""),
+                    "Clase de término": row.get("Clase de término", ""),
+                    "Fecha base automática": None,
+                    "Inicio automático": None,
+                    "Vencimiento automático": None,
+                    "Semáforo": "Amarillo",
+                    "Estado": "Falta fecha de notificación",
+                    "Actuación exigida": row.get("Actuación exigida", ""),
+                    "Actuación que puede continuar": (
+                        "Confirmar la fecha efectiva de notificación antes de calcular."
+                    ),
+                    "Confianza fecha": date_confidence,
+                    "Fundamento fecha": date_reason,
+                    "Regla usada": day_rule,
+                    "Fundamento regla": day_reason,
+                    "Regla de inicio": start_rule,
+                    "Fundamento inicio": start_reason,
+                    "Revisión obligatoria": True,
+                }
+            )
+            continue
+
+        notification = datetime.combine(
+            notification_date,
+            time(8, 0),
+        )
+
+        calculation_rule = (
+            "Hábiles"
+            if day_rule == "Horas continuas o por confirmar"
+            else day_rule
+        )
+
+        start, deadline = calculate_deadline(
+            notification=notification,
+            quantity=int(row.get("Cantidad", 0)),
+            unit=str(row.get("Unidad", "Días")),
+            day_rule=calculation_rule,
+            start_rule=start_rule,
+            excluded=set(),
+        )
+
+        color, deadline_state, remaining_hours = status(deadline)
+
+        results.append(
+            {
+                "Documento": row.get("Documento", ""),
+                "Página": row.get("Página", ""),
+                "Clase de término": row.get("Clase de término", ""),
+                "Fecha base automática": notification,
+                "Inicio automático": start,
+                "Vencimiento automático": deadline,
+                "Semáforo": color,
+                "Estado": deadline_state,
+                "Horas restantes": round(remaining_hours, 1),
+                "Actuación exigida": row.get("Actuación exigida", ""),
+                "Actuación que puede continuar": continuation(
+                    pd.Series(row),
+                    deadline_state,
+                ),
+                "Confianza fecha": date_confidence,
+                "Fundamento fecha": date_reason,
+                "Regla usada": day_rule,
+                "Fundamento regla": day_reason,
+                "Regla de inicio": start_rule,
+                "Fundamento inicio": start_reason,
+                "Revisión obligatoria": (
+                    date_confidence < 80
+                    or "provisional" in day_reason.lower()
+                    or "provisional" in start_reason.lower()
+                ),
+            }
+        )
+
+    return pd.DataFrame(results)
+
 with st.sidebar:
     st.header("OCR")
     enabled = st.checkbox("Aplicar OCR", value=True)
@@ -486,6 +740,50 @@ if not rows:
 
 
 st.success(f"Se detectaron {len(rows)} posible(s) término(s).")
+
+automatic_results = build_automatic_results(
+    rows,
+    pages,
+)
+
+st.subheader("Resultado automático")
+
+if automatic_results.empty:
+    st.warning(
+        "No fue posible generar un cálculo automático."
+    )
+else:
+    st.dataframe(
+        automatic_results,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    for _, result in automatic_results.iterrows():
+        icon = {
+            "Rojo": "🔴",
+            "Amarillo": "🟡",
+            "Verde": "🟢",
+        }.get(result["Semáforo"], "⚪")
+
+        st.info(
+            f"{icon} **{result['Clase de término']}**\n\n"
+            f"**Vencimiento automático:** "
+            f"{result['Vencimiento automático'] or 'No calculado'}\n\n"
+            f"**Estado:** {result['Estado']}\n\n"
+            f"**Actuación siguiente:** "
+            f"{result['Actuación que puede continuar']}\n\n"
+            f"**Fecha usada:** {result['Fundamento fecha']}\n\n"
+            f"**Regla usada:** {result['Regla usada']} — "
+            f"{result['Fundamento regla']}"
+        )
+
+    st.warning(
+        "Los resultados automáticos que usen la fecha principal del documento "
+        "o una regla provisional deben confirmarse antes de presentar una actuación."
+    )
+
+    st.session_state["automatic_expiry_results"] = automatic_results
 
 data = pd.DataFrame(rows)
 
@@ -715,6 +1013,15 @@ with pd.ExcelWriter(excel, engine="openpyxl") as writer:
         index=False,
     )
 
+    st.session_state.get(
+        "automatic_expiry_results",
+        pd.DataFrame(),
+    ).to_excel(
+        writer,
+        sheet_name="Cálculo automático",
+        index=False,
+    )
+
 st.download_button(
     "Descargar análisis en Excel",
     data=excel.getvalue(),
@@ -722,3 +1029,4 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     use_container_width=True,
 )
+
