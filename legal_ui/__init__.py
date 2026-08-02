@@ -1,1 +1,1 @@
-"""Componentes UI estilo Lexivox."""
+"""Componentes UI del despacho (garciabermeo.net)."""

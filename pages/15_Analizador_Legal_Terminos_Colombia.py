@@ -12,6 +12,11 @@ from legal_analyzer.document_loader import load_document
 from legal_analyzer.models import PageTrace
 from legal_analyzer.ocr_engine import OCRConfig
 
+from legal_ui.case_context import LOADED_FILES_KEY
+from legal_ui.colombia_calendar import calculate_deadline_colombia as calculate_deadline
+from legal_ui.colombia_calendar import colombia_holidays, next_business_day
+from legal_ui.tool_bridge import render_active_case_banner, render_sync_terms_to_lexivox
+
 
 st.set_page_config(
     page_title="Analizador Legal de Términos Colombia",
@@ -333,47 +338,6 @@ def detect(pages: list[PageTrace]) -> list[dict]:
     return unique
 
 
-def next_business_day(value: datetime, excluded: set[date]) -> datetime:
-    current = value
-
-    while current.weekday() >= 5 or current.date() in excluded:
-        current += timedelta(days=1)
-
-    return current
-
-
-def calculate_deadline(
-    notification: datetime,
-    quantity: int,
-    unit: str,
-    day_rule: str,
-    start_rule: str,
-    excluded: set[date],
-) -> tuple[datetime, datetime]:
-    if start_rule == "Comienza al día siguiente":
-        start = notification + timedelta(days=1)
-    else:
-        start = notification
-
-    if unit == "Horas":
-        return start, start + timedelta(hours=quantity)
-
-    if day_rule == "Calendario":
-        return start, start + timedelta(days=max(quantity - 1, 0))
-
-    start = next_business_day(start, excluded)
-    current = start
-    counted = 1
-
-    while counted < quantity:
-        current += timedelta(days=1)
-
-        if current.weekday() < 5 and current.date() not in excluded:
-            counted += 1
-
-    return start, current
-
-
 def status(deadline: datetime) -> tuple[str, str, float]:
     hours = (deadline - datetime.now()).total_seconds() / 3600
 
@@ -656,7 +620,10 @@ def build_automatic_results(
             unit=str(row.get("Unidad", "Días")),
             day_rule=calculation_rule,
             start_rule=start_rule,
-            excluded=set(),
+            excluded=colombia_holidays(
+                notification.date(),
+                notification.date() + timedelta(days=730),
+            ),
         )
 
         color, deadline_state, remaining_hours = status(deadline)
@@ -705,10 +672,17 @@ with st.sidebar:
     )
 
 
+render_active_case_banner()
+
 uploaded = st.file_uploader(
     "Sube el documento que quieres analizar",
     type=["pdf", "docx", "txt", "jpg", "jpeg", "png", "eml"],
 )
+
+if not uploaded:
+    loaded = st.session_state.get(LOADED_FILES_KEY) or []
+    if loaded:
+        uploaded = loaded[0]
 
 if not uploaded:
     st.info("Sube un auto, fallo, requerimiento, notificación o constancia.")
@@ -781,6 +755,12 @@ else:
     st.warning(
         "Los resultados automáticos que usen la fecha principal del documento "
         "o una regla provisional deben confirmarse antes de presentar una actuación."
+    )
+
+    render_sync_terms_to_lexivox(
+        automatic_results.to_dict(orient="records"),
+        source="colombia",
+        key="sync_colombia_auto_terms",
     )
 
     st.session_state["automatic_expiry_results"] = automatic_results

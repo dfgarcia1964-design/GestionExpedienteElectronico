@@ -21,6 +21,10 @@ from legal_analyzer.document_loader import load_document
 from legal_analyzer.models import PageTrace
 from legal_analyzer.ocr_engine import OCRConfig
 
+from legal_ui.case_context import LOADED_FILES_KEY, apply_prefill
+from legal_ui.brand import BRAND_NAME
+from legal_ui.tool_bridge import render_active_case_banner, render_save_result_button
+
 
 st.set_page_config(
     page_title="Organizador de Vigilancia Judicial",
@@ -590,6 +594,16 @@ for column, (number, title, description) in zip(step_cols, steps):
         )
 
 
+render_active_case_banner()
+apply_prefill(
+    {
+        "org_solicitante": "solicitante",
+        "org_despacho": "despacho",
+        "org_radicado": "radicado",
+        "org_tipo_proceso": "tipo_proceso",
+    }
+)
+
 tab_data, tab_upload, tab_review, tab_package = st.tabs(
     [
         "📋 Datos del proceso",
@@ -609,20 +623,24 @@ with tab_data:
         solicitante = st.text_input(
             "Nombre del solicitante",
             placeholder="Ejemplo: Diego Fernando García Bermeo",
+            key="org_solicitante",
         )
         despacho = st.text_input(
             "Despacho judicial",
             placeholder="Ejemplo: Juzgado Octavo Penal Municipal de Popayán",
+            key="org_despacho",
         )
 
     with col2:
         radicado_manual = st.text_input(
             "Radicado completo",
             placeholder="19-001-40-88-008-2025-00274-00",
+            key="org_radicado",
         )
         tipo_proceso = st.text_input(
             "Tipo de proceso",
             value="Vigilancia Judicial Administrativa",
+            key="org_tipo_proceso",
         )
 
     st.markdown(
@@ -670,6 +688,11 @@ with tab_upload:
         st.info(
             "Carga el fallo, autos, memoriales, constancias, consultas y demás anexos."
         )
+
+loaded_from_case = st.session_state.get(LOADED_FILES_KEY)
+if loaded_from_case and not st.session_state.get("vigilancia_uploaded_files"):
+    st.session_state["vigilancia_uploaded_files"] = loaded_from_case
+    st.success(f"Se cargaron {len(loaded_from_case)} documento(s) del caso en {BRAND_NAME}.")
 
 
 if not st.session_state.get("vigilancia_uploaded_files"):
@@ -1047,6 +1070,15 @@ with tab_package:
             use_container_width=True,
             type="primary",
         )
+
+    render_save_result_button(
+        "Organizador Vigilancia",
+        f"Paquete vigilancia — {radicado or 'sin radicado'}",
+        "PAQUETE_VIGILANCIA_JUDICIAL.zip",
+        zip_buffer.getvalue(),
+        key="save_vigilancia_zip_to_case",
+        notas=f"Despacho: {despacho or 'N/D'} · {len(final_df)} anexos",
+    )
 
     if missing:
         st.markdown(

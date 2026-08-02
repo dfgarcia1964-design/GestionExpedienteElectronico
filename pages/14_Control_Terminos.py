@@ -14,6 +14,11 @@ from legal_analyzer.document_loader import load_document
 from legal_analyzer.models import PageTrace
 from legal_analyzer.ocr_engine import OCRConfig
 
+from legal_ui.case_context import LOADED_FILES_KEY, apply_prefill
+from legal_ui.colombia_calendar import calculate_deadline_simple as calculate_deadline
+from legal_ui.colombia_calendar import merge_excluded_dates
+from legal_ui.tool_bridge import render_active_case_banner, render_sync_terms_to_lexivox
+
 
 st.set_page_config(
     page_title="Control de Términos",
@@ -237,31 +242,6 @@ def detect_deadlines(pages: list[PageTrace]) -> list[dict]:
     return unique
 
 
-def calculate_deadline(
-    start: datetime,
-    quantity: int,
-    unit: str,
-    rule: str,
-    excluded: set[date],
-) -> datetime:
-    if unit == "Horas":
-        return start + timedelta(hours=quantity)
-
-    if rule == "Calendario":
-        return start + timedelta(days=quantity)
-
-    current = start
-    counted = 0
-
-    while counted < quantity:
-        current += timedelta(days=1)
-
-        if current.weekday() < 5 and current.date() not in excluded:
-            counted += 1
-
-    return current
-
-
 def status_for(deadline: datetime) -> tuple[str, str, float]:
     hours = (deadline - datetime.now()).total_seconds() / 3600
 
@@ -337,7 +317,19 @@ with st.sidebar:
         [150, 200, 220, 250, 300],
         value=220,
     )
+    usar_festivos_co = st.checkbox(
+        "Excluir festivos Colombia (días hábiles)",
+        value=True,
+    )
 
+
+render_active_case_banner()
+apply_prefill(
+    {
+        "manual_expediente": "caso_nombre",
+        "manual_radicado": "radicado",
+    }
+)
 
 st.subheader("1. Subir documento para revisar términos")
 
@@ -346,6 +338,11 @@ uploaded = st.file_uploader(
     type=["pdf", "docx", "txt", "jpg", "jpeg", "png", "eml"],
     accept_multiple_files=False,
 )
+
+if not uploaded:
+    loaded = st.session_state.get(LOADED_FILES_KEY) or []
+    if loaded:
+        uploaded = loaded[0]
 
 detected_df = pd.DataFrame()
 
@@ -433,24 +430,11 @@ if uploaded:
             type="primary",
             use_container_width=True,
         ):
-            excluded = set()
-            invalid = []
-
-            for line in excluded_text.splitlines():
-                value = line.strip()
-
-                if not value:
-                    continue
-
-                try:
-                    excluded.add(
-                        datetime.strptime(
-                            value,
-                            "%Y-%m-%d",
-                        ).date()
-                    )
-                except ValueError:
-                    invalid.append(value)
+            st.session_state["usar_festivos_co"] = usar_festivos_co
+            excluded, invalid = merge_excluded_dates(
+                excluded_text,
+                include_colombia=usar_festivos_co,
+            )
 
             if invalid:
                 st.error(
@@ -579,8 +563,8 @@ with st.form("manual_term"):
     c1, c2, c3 = st.columns(3)
 
     with c1:
-        expediente = st.text_input("Expediente")
-        radicado = st.text_input("Radicado")
+        expediente = st.text_input("Expediente", key="manual_expediente")
+        radicado = st.text_input("Radicado", key="manual_radicado")
         actuacion = st.text_input(
             "Próxima actuación",
             placeholder="Ejemplo: incidente de desacato",
@@ -631,12 +615,16 @@ with st.form("manual_term"):
 
 if guardar:
     start = datetime.combine(fecha, hora)
+    excluded_manual, _ = merge_excluded_dates(
+        "",
+        include_colombia=st.session_state.get("usar_festivos_co", True),
+    )
     deadline = calculate_deadline(
         start,
         int(cantidad),
         unidad,
         regla,
-        set(),
+        excluded_manual,
     )
     color, state, hours = status_for(deadline)
 
@@ -755,6 +743,12 @@ edited = st.data_editor(
     key="terms_editor",
 )
 
+sync_rows = edited.to_dict(orient="records")
+render_sync_terms_to_lexivox(
+    sync_rows,
+    source="control",
+    key="sync_control_terms_agenda",
+)
 
 st.subheader("4. Qué hacer primero")
 

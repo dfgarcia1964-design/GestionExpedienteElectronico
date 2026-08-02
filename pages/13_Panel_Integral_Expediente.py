@@ -36,6 +36,9 @@ from legal_analyzer.semaphore_engine import (
     overall_semaphore,
 )
 
+from legal_ui.case_context import LOADED_FILES_KEY
+from legal_ui.tool_bridge import render_active_case_banner
+
 
 st.set_page_config(
     page_title="Panel Integral del Expediente",
@@ -121,11 +124,16 @@ with st.sidebar:
     )
 
 
+render_active_case_banner()
+
 files = st.file_uploader(
     "Sube todas las piezas del expediente",
     type=["pdf", "docx", "txt", "jpg", "jpeg", "png", "eml"],
     accept_multiple_files=True,
 )
+
+if not files:
+    files = st.session_state.get(LOADED_FILES_KEY)
 
 if not files:
     st.info(

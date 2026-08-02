@@ -57,6 +57,10 @@ temp_expediente/
 # Carpetas de datos o resultados generados
 data/*
 !data/despacho.example.json
+!data/colombia_festivos.json
+!data/colombia_normas/
+!data/colombia_normas/constitucion.json
+data/colombia_normas/constitucion_fuente.txt
 results/
 
 # Archivos específicos del proyecto (ajusta según tus necesidades)
@@ -74,6 +78,7 @@ GestionExpedienteElectronico_Windows.zip
 # Archivos Streamlit
 .streamlit/*
 !.streamlit/config.toml
+!.streamlit/secrets.toml.example
 secrets.toml
 
 # Instrucción para crear el portable

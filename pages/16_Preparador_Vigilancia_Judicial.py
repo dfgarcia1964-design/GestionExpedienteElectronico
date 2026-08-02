@@ -33,6 +33,9 @@ from legal_analyzer.document_loader import load_document
 from legal_analyzer.models import PageTrace
 from legal_analyzer.ocr_engine import OCRConfig
 
+from legal_ui.case_context import apply_prefill
+from legal_ui.tool_bridge import render_active_case_banner
+
 
 st.set_page_config(
     page_title="Preparador de Vigilancia Judicial",
@@ -50,6 +53,17 @@ st.warning(
     "La vigilancia judicial administrativa controla oportunidad y eficacia "
     "en la gestión del despacho. No reemplaza recursos, tutelas, incidentes "
     "ni trámites disciplinarios. Cada conclusión debe revisarse antes de radicar."
+)
+
+render_active_case_banner()
+apply_prefill(
+    {
+        "prep_applicant_name": "solicitante",
+        "prep_applicant_id": "cliente_documento",
+        "prep_applicant_email": "cliente_email",
+        "prep_applicant_phone": "cliente_telefono",
+        "prep_process_type": "tipo_proceso",
+    }
 )
 
 
@@ -1303,12 +1317,12 @@ selected_case = next(
 c1, c2 = st.columns(2)
 
 with c1:
-    applicant_name = st.text_input("Nombres y apellidos")
-    applicant_id = st.text_input("Número de identificación")
-    applicant_email = st.text_input("Correo electrónico")
+    applicant_name = st.text_input("Nombres y apellidos", key="prep_applicant_name")
+    applicant_id = st.text_input("Número de identificación", key="prep_applicant_id")
+    applicant_email = st.text_input("Correo electrónico", key="prep_applicant_email")
 
 with c2:
-    applicant_phone = st.text_input("Teléfono")
+    applicant_phone = st.text_input("Teléfono", key="prep_applicant_phone")
     applicant_quality = st.selectbox(
         "Calidad",
         [
@@ -1318,7 +1332,7 @@ with c2:
             "Otro",
         ],
     )
-    process_type = st.text_input("Tipo de proceso")
+    process_type = st.text_input("Tipo de proceso", key="prep_process_type")
 
 description = st.text_area(
     "Descripción para copiar en el portal",

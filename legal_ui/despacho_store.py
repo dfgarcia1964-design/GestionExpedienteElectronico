@@ -15,9 +15,60 @@ STORE_PATH = DATA_DIR / "despacho.json"
 TASK_STATES = ("pendiente", "en_curso", "completada")
 CASE_STATES = ("activo", "pausado", "cerrado", "archivado")
 
+__all__ = [
+    "CASE_STATES",
+    "TASK_STATES",
+    "all_open_tasks",
+    "case_metrics",
+    "cases_for_client",
+    "client_map",
+    "client_name",
+    "complete_task",
+    "default_store",
+    "delete_case",
+    "delete_client",
+    "delete_event",
+    "delete_task",
+    "events_in_range",
+    "export_excel",
+    "export_json",
+    "find_case",
+    "find_client",
+    "global_metrics",
+    "import_excel",
+    "import_json",
+    "load_store",
+    "new_id",
+    "open_tasks",
+    "overdue_tasks",
+    "parse_date",
+    "reset_store",
+    "save_store",
+    "search_store",
+    "set_time_billing_state",
+    "toggle_time_billed",
+]
+
 
 def _today() -> date:
     return date.today()
+
+
+def _normalize_case(case: dict) -> None:
+    case.setdefault("despacho", "")
+    case.setdefault("tipo_proceso", "")
+    case.setdefault("partes", "")
+    case.setdefault("documentos", [])
+    case.setdefault("resultados", [])
+    case.setdefault("tarifa_hora", 0)
+
+
+def _normalize_store(store: dict) -> None:
+    from legal_ui.billing import normalize_store_billing
+
+    normalize_store_billing(store)
+    for case in store.get("casos", []):
+        _normalize_case(case)
 
 
 def default_store() -> dict:
@@ -29,6 +80,7 @@ def default_store() -> dict:
             "documento": "52.123.456",
             "email": "maria.lopez@correo.com",
             "telefono": "3001234567",
+            "tarifa_hora": 0,
         },
         {
             "id": "cl2",
@@ -58,8 +110,13 @@ def default_store() -> dict:
             "nombre": "Vigilancia judicial — Juzgado 1 Civil",
             "cliente_id": "cl1",
             "radicado": "2024-00123",
+            "despacho": "Juzgado Primero Civil Municipal",
+            "tipo_proceso": "Vigilancia Judicial Administrativa",
+            "partes": "María López — solicitante",
             "estado": "activo",
             "notas": "Falta memorial de impulso y constancia de radicación.",
+            "documentos": [],
+            "resultados": [],
             "tareas": [
                 {
                     "id": "t1",
@@ -116,8 +173,13 @@ def default_store() -> dict:
             "nombre": "Tutela derecho de petición — EPS",
             "cliente_id": "cl2",
             "radicado": "2025-00456",
+            "despacho": "Juzgado de Ejecución de Penas y Medidas de Seguridad",
+            "tipo_proceso": "Tutela",
+            "partes": "Carlos Ruiz vs. EPS accionada",
             "estado": "activo",
             "notas": "Esperando respuesta de la accionada.",
+            "documentos": [],
+            "resultados": [],
             "tareas": [
                 {
                     "id": "t4",
@@ -149,8 +211,13 @@ def default_store() -> dict:
             "nombre": "Conciliación extrajudicial laboral",
             "cliente_id": "cl3",
             "radicado": "2023-00987",
+            "despacho": "Centro de Conciliación",
+            "tipo_proceso": "Conciliación extrajudicial",
+            "partes": "Empresa ABC S.A.S.",
             "estado": "pausado",
             "notas": "Pausado a solicitud del cliente.",
+            "documentos": [],
+            "resultados": [],
             "tareas": [],
             "eventos": [],
             "tiempo": [],
@@ -160,27 +227,74 @@ def default_store() -> dict:
             "nombre": "Incidente de desacato tutela",
             "cliente_id": "cl4",
             "radicado": "2022-00321",
+            "despacho": "Juzgado de Familia",
+            "tipo_proceso": "Incidente de desacato",
+            "partes": "Ana Torres",
             "estado": "cerrado",
             "notas": "Fallo favorable. Archivo listo.",
+            "documentos": [],
+            "resultados": [],
             "tareas": [],
             "eventos": [],
             "tiempo": [],
         },
     ]
-    return {"clientes": clientes, "casos": casos}
+    store = {
+        "config": {"tarifa_default_hora": 150_000, "moneda": "COP"},
+        "clientes": clientes,
+        "casos": casos,
+    }
+    _normalize_store(store)
+    return store
 
 
 def load_store() -> dict:
+    from legal_ui.auth import get_current_user_id, use_database_storage
+
+    user_id = get_current_user_id()
+    if use_database_storage() and user_id:
+        from legal_ui.database import load_store_json
+
+        raw = load_store_json(user_id)
+        if raw:
+            store = json.loads(raw)
+            _normalize_store(store)
+            return store
+
+        if STORE_PATH.exists():
+            with STORE_PATH.open(encoding="utf-8") as handle:
+                store = json.load(handle)
+            _normalize_store(store)
+            save_store(store)
+            return store
+
+        store = default_store()
+        save_store(store)
+        return store
+
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if not STORE_PATH.exists():
         store = default_store()
         save_store(store)
         return store
     with STORE_PATH.open(encoding="utf-8") as handle:
-        return json.load(handle)
+        store = json.load(handle)
+    _normalize_store(store)
+    return store
 
 
 def save_store(store: dict) -> None:
+    from legal_ui.auth import get_current_user_id, use_database_storage
+
+    user_id = get_current_user_id()
+    if use_database_storage() and user_id:
+        from legal_ui.database import save_store_json
+
+        for case in store.get("casos", []):
+            _normalize_case(case)
+        save_store_json(user_id, json.dumps(store, ensure_ascii=False))
+        return
+
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with STORE_PATH.open("w", encoding="utf-8") as handle:
         json.dump(store, handle, ensure_ascii=False, indent=2)
@@ -251,7 +365,8 @@ def case_metrics(case: dict, today: date | None = None) -> dict[str, int]:
     unbilled = sum(
         entry.get("minutos", 0)
         for entry in case.get("tiempo", [])
-        if not entry.get("facturado")
+        if entry.get("estado_facturacion", "pendiente" if not entry.get("facturado") else "facturado")
+        == "pendiente"
     )
     return {
         "tareas_abiertas": len(open_list),
@@ -261,10 +376,13 @@ def case_metrics(case: dict, today: date | None = None) -> dict[str, int]:
     }
 
 
-def global_metrics(store: dict, today: date | None = None) -> dict[str, int]:
+def global_metrics(store: dict, today: date | None = None) -> dict[str, int | float]:
     today = today or _today()
     casos = store.get("casos", [])
     activos = [case for case in casos if case.get("estado") == "activo"]
+    from legal_ui.billing import billing_totals
+
+    billing = billing_totals(store)
     return {
         "activos": len(activos),
         "clientes": len(store.get("clientes", [])),
@@ -272,6 +390,7 @@ def global_metrics(store: dict, today: date | None = None) -> dict[str, int]:
         "vencidas": sum(case_metrics(case, today)["vencidas"] for case in casos),
         "eventos": len(events_in_range(store, today, today + timedelta(days=7))),
         "sin_facturar": sum(case_metrics(case, today)["minutos_sin_facturar"] for case in casos),
+        "valor_pendiente": billing["pendiente"],
     }
 
 
@@ -297,6 +416,100 @@ def find_case(store: dict, case_id: str) -> dict | None:
         if case["id"] == case_id:
             return case
     return None
+
+
+def find_client(store: dict, client_id: str) -> dict | None:
+    for client in store.get("clientes", []):
+        if client["id"] == client_id:
+            return client
+    return None
+
+
+def cases_for_client(store: dict, client_id: str) -> list[dict]:
+    return [case for case in store.get("casos", []) if case.get("cliente_id") == client_id]
+
+
+def delete_case(store: dict, case_id: str) -> None:
+    store["casos"] = [case for case in store.get("casos", []) if case["id"] != case_id]
+
+
+def delete_client(store: dict, client_id: str) -> None:
+    store["clientes"] = [client for client in store.get("clientes", []) if client["id"] != client_id]
+    for case in store.get("casos", []):
+        if case.get("cliente_id") == client_id:
+            case["cliente_id"] = ""
+
+
+def complete_task(store: dict, case_id: str, task_id: str) -> None:
+    case = find_case(store, case_id)
+    if not case:
+        return
+    for task in case.get("tareas", []):
+        if task.get("id") == task_id:
+            task["estado"] = "completada"
+            return
+
+
+def delete_task(store: dict, case_id: str, task_id: str) -> None:
+    case = find_case(store, case_id)
+    if not case:
+        return
+    case["tareas"] = [task for task in case.get("tareas", []) if task.get("id") != task_id]
+
+
+def delete_event(store: dict, case_id: str, event_id: str) -> None:
+    case = find_case(store, case_id)
+    if not case:
+        return
+    case["eventos"] = [event for event in case.get("eventos", []) if event.get("id") != event_id]
+
+
+def set_time_billing_state(store: dict, case_id: str, entry_id: str, estado: str) -> None:
+    from legal_ui.billing import BILLING_STATES, normalize_time_entry
+
+    if estado not in BILLING_STATES:
+        return
+    case = find_case(store, case_id)
+    if not case:
+        return
+    for entry in case.get("tiempo", []):
+        if entry.get("id") == entry_id:
+            entry["estado_facturacion"] = estado
+            normalize_time_entry(entry)
+            return
+
+
+def toggle_time_billed(store: dict, case_id: str, entry_id: str, billed: bool) -> None:
+    set_time_billing_state(store, case_id, entry_id, "facturado" if billed else "pendiente")
+
+
+def search_store(store: dict, query: str) -> dict[str, list[dict]]:
+    query = query.lower().strip()
+    if not query:
+        return {"casos": [], "clientes": [], "tareas": []}
+
+    casos = [
+        case
+        for case in store.get("casos", [])
+        if query in case.get("nombre", "").lower()
+        or query in case.get("radicado", "").lower()
+        or query in client_name(store, case.get("cliente_id", "")).lower()
+    ]
+    clientes = [
+        client
+        for client in store.get("clientes", [])
+        if query in client.get("nombre", "").lower()
+        or query in client.get("documento", "").lower()
+        or query in client.get("email", "").lower()
+    ]
+    tareas = [
+        task
+        for task in all_open_tasks(store)
+        if query in task.get("titulo", "").lower()
+        or query in task.get("caso", "").lower()
+        or query in task.get("cliente", "").lower()
+    ]
+    return {"casos": casos, "clientes": clientes, "tareas": tareas}
 
 
 def export_excel(store: dict) -> bytes:
@@ -391,6 +604,7 @@ def import_excel(content: bytes) -> dict:
     _attach(tasks_df, "tareas")
     _attach(events_df, "eventos")
     _attach(time_df, "tiempo")
+    _normalize_store(store)
     return store
 
 
@@ -403,6 +617,7 @@ def import_json(content: bytes) -> dict:
     if not isinstance(loaded, dict) or "casos" not in loaded:
         raise ValueError("El JSON no tiene el formato esperado.")
     loaded.setdefault("clientes", [])
+    _normalize_store(loaded)
     return loaded
 
 

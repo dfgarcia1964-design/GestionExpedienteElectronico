@@ -1,4 +1,6 @@
-"""Tema visual inspirado en Lexivox para paginas Streamlit."""
+"""Tema visual para la interfaz del despacho (garciabermeo.net)."""
+
+from legal_ui.brand import BRAND_NAME
 
 LEXIVOX_CSS = """
 <style>
@@ -22,15 +24,64 @@ html, body, [class*="css"] {
 }
 
 [data-testid="stSidebar"] .stButton > button {
-    background: transparent;
+    background: #111827;
     border: 1px solid #374151;
     color: #f9fafb !important;
     border-radius: 10px;
     text-align: left;
     width: 100%;
+    font-size: 0.82rem;
 }
 
 [data-testid="stSidebar"] .stButton > button:hover {
+    background: #1f2937;
+    border-color: #4b5563;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] {
+    background: transparent;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] label {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 0.55rem 0.65rem;
+    margin-bottom: 0.15rem;
+    width: 100%;
+    color: #cbd5e1 !important;
+    font-size: 0.88rem;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
+    background: #1f2937;
+    border-color: #374151;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] label[data-checked="true"],
+[data-testid="stSidebar"] [data-testid="stRadio"] div[aria-checked="true"] label {
+    background: rgba(59, 130, 246, 0.18) !important;
+    border-color: rgba(59, 130, 246, 0.35) !important;
+    color: #ffffff !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] {
+    gap: 0.15rem;
+}
+
+[data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"] {
+    display: block;
+    background: #111827;
+    border: 1px solid #374151;
+    border-radius: 10px;
+    padding: 0.5rem 0.65rem;
+    margin-bottom: 0.35rem;
+    text-decoration: none;
+    color: #e5e7eb !important;
+    font-size: 0.84rem;
+}
+
+[data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"]:hover {
     background: #1f2937;
     border-color: #4b5563;
 }
@@ -251,6 +302,12 @@ STATUS_LABELS = {
     "pausado": "Pausado",
     "cerrado": "Cerrado",
     "archivado": "Archivado",
+}
+
+TASK_LABELS = {
+    "pendiente": "Pendiente",
+    "en_curso": "En curso",
+    "completada": "Completada",
 }
 
 FILTER_OPTIONS = [

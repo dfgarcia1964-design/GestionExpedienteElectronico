@@ -1,62 +1,149 @@
 from __future__ import annotations
 
+import importlib
+
 import streamlit as st
+from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+from legal_ui.brand import BRAND_NAME
+from legal_ui import page_registry
+
+importlib.reload(page_registry)
+from legal_ui.page_registry import APP_PAGES, TOOL_SECTIONS, page_exists
+from legal_ui.auth_ui import render_user_badge
+
+ILEY_PAGE = "pages/26_Consulta_Normativa_iLey_CO.py"
+
 
 VISTAS = [
+    ("dashboard", "📊 Dashboard"),
     ("casos", "📁 Casos"),
     ("clientes", "👥 Clientes"),
     ("tareas", "✅ Tareas"),
     ("calendario", "📅 Calendario"),
+    ("facturacion", "💰 Facturación"),
+    ("configuracion", "⚙️ Configuración"),
 ]
 
 
-def render_lexivox_sidebar(vista_activa: str, buscar: str = "") -> str:
-    st.markdown('<div class="lx-brand">Lexivox</div>', unsafe_allow_html=True)
+def _vista_labels() -> dict[str, str]:
+    return dict(VISTAS)
+
+
+def _multipage_ready() -> bool:
+    ctx = get_script_run_ctx()
+    if not ctx or not ctx.pages_manager:
+        return False
+    try:
+        return len(ctx.pages_manager.get_pages()) > 1
+    except Exception:
+        return False
+
+
+def _nav_to_page(page_path: str) -> None:
+    if not page_exists(page_path):
+        st.error(f"No se encontró la página: {page_path}")
+        return
+    st.switch_page(page_path)
+
+
+def _render_nav_button(label: str, page_path: str, key: str) -> None:
+    if st.button(label, key=key, use_container_width=True):
+        _nav_to_page(page_path)
+
+
+def render_lexivox_sidebar(vista_activa: str) -> str:
+    labels = _vista_labels()
+    keys = list(labels.keys())
+
+    st.markdown(f'<div class="lx-brand">{BRAND_NAME}</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="lx-brand-sub">Gestión de expedientes judiciales</div>',
         unsafe_allow_html=True,
     )
+
     query = st.text_input(
         "Buscar",
-        value=buscar,
         placeholder="Radicado, cliente, asunto...",
         label_visibility="collapsed",
         key="lexivox_buscar",
     )
 
     st.markdown('<div class="lx-nav-section">PRINCIPAL</div>', unsafe_allow_html=True)
-    for key, label in VISTAS:
-        css_class = "lx-nav-item active" if vista_activa == key else "lx-nav-item"
-        st.markdown(f'<div class="{css_class}">{label}</div>', unsafe_allow_html=True)
-        if vista_activa != key and st.button(f"Abrir {label.split(' ', 1)[1]}", key=f"nav_{key}", use_container_width=True):
-            st.session_state.lexivox_vista = key
+    selected = st.radio(
+        "Navegación principal",
+        options=keys,
+        index=keys.index(vista_activa) if vista_activa in keys else 0,
+        format_func=lambda key: labels[key],
+        key="lexivox_nav_radio",
+        label_visibility="collapsed",
+    )
+    if selected != st.session_state.get("lexivox_vista"):
+        st.session_state.lexivox_vista = selected
+        st.rerun()
+
+    st.markdown('<div class="lx-nav-section">ACCIONES RÁPIDAS</div>', unsafe_allow_html=True)
+    quick_col1, quick_col2 = st.columns(2)
+    with quick_col1:
+        if st.button("➕ Caso", use_container_width=True, key="quick_new_case"):
+            st.session_state.lexivox_vista = "casos"
+            st.session_state.mostrar_formulario_caso = True
+            st.rerun()
+    with quick_col2:
+        if st.button("➕ Cliente", use_container_width=True, key="quick_new_client"):
+            st.session_state.lexivox_vista = "clientes"
+            st.session_state.mostrar_formulario_cliente = True
             st.rerun()
 
+    if st.button("📚 Consulta iLey CO", use_container_width=True, key="quick_iley"):
+        _nav_to_page(ILEY_PAGE)
+
+    if not _multipage_ready():
+        st.caption("Use los botones para abrir herramientas del sistema.")
+
     st.markdown('<div class="lx-nav-section">APLICACIÓN</div>', unsafe_allow_html=True)
-    for label, target in [
-        ("🏠 Inicio", "🏠_Inicio.py"),
-        ("🤖 Asistente Legal", "pages/2_🤖_Experto_en_Expediente_Electronico.py"),
-    ]:
-        st.markdown(f'<div class="lx-nav-item">{label}</div>', unsafe_allow_html=True)
-        try:
-            st.page_link(target, label=f"Ir a {label.split(' ', 1)[1]}", use_container_width=True)
-        except Exception:
-            pass
+    for label, target in APP_PAGES:
+        _render_nav_button(label, target, key=f"app_{target}")
 
     st.markdown('<div class="lx-nav-section">HERRAMIENTAS</div>', unsafe_allow_html=True)
-    for label, target in [
-        ("📚 Organizador Vigilancia", "pages/24_Organizador_Automatico_Vigilancia.py"),
-        ("⚖️ Auditor Jurídico V2", "pages/6_Auditor_Juridico_V2.py"),
-        ("🧠 Panel Integral", "pages/13_Panel_Integral_Expediente.py"),
-    ]:
-        st.markdown(f'<div class="lx-nav-item">{label}</div>', unsafe_allow_html=True)
-        try:
-            st.page_link(target, label=f"Abrir {label.split(' ', 1)[1]}", use_container_width=True)
-        except Exception:
-            pass
+    tool_options = {"— Seleccionar herramienta —": ""}
+    for section_name, pages in TOOL_SECTIONS:
+        for label, target in pages:
+            tool_options[f"{label}"] = target
+
+    picked = st.selectbox(
+        "Ir a herramienta",
+        options=list(tool_options.keys()),
+        key="lexivox_tool_picker",
+        label_visibility="collapsed",
+    )
+    picked_path = tool_options[picked]
+    if picked_path and st.button("Abrir herramienta", key="open_tool_picker", use_container_width=True):
+        _nav_to_page(picked_path)
+
+    for section_name, pages in TOOL_SECTIONS:
+        expanded = section_name == "Consulta normativa"
+        with st.expander(section_name, expanded=expanded):
+            for label, target in pages:
+                _render_nav_button(label, target, key=f"tool_{target}")
+
+    store = st.session_state.get("despacho_store", {})
+    casos_recientes = store.get("casos", [])[:4]
+    if casos_recientes:
+        st.markdown('<div class="lx-nav-section">RECIENTES</div>', unsafe_allow_html=True)
+        for case in casos_recientes:
+            if st.button(
+                case.get("nombre", "Caso")[:42],
+                key=f"recent_{case['id']}",
+                use_container_width=True,
+            ):
+                st.session_state.lexivox_vista = "casos"
+                st.session_state.caso_seleccionado_id = case["id"]
+                st.rerun()
 
     st.markdown(
-        '<div class="lx-status-bar">Estado: Online · Core v3.0 · Datos locales JSON/Excel</div>',
+        '<div class="lx-status-bar">Estado: Online · Core v3.0</div>',
         unsafe_allow_html=True,
     )
+    render_user_badge()
     return query.strip().lower()
