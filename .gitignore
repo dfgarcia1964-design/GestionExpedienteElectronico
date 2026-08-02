@@ -55,7 +55,8 @@ Thumbs.db
 temp_expediente/
 
 # Carpetas de datos o resultados generados
-data/
+data/*
+!data/despacho.example.json
 results/
 
 # Archivos específicos del proyecto (ajusta según tus necesidades)

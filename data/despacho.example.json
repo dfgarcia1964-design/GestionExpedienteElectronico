@@ -1,0 +1,24 @@
+{
+  "clientes": [
+    {
+      "id": "cl1",
+      "nombre": "María López",
+      "documento": "52.123.456",
+      "email": "maria.lopez@correo.com",
+      "telefono": "3001234567"
+    }
+  ],
+  "casos": [
+    {
+      "id": "c1",
+      "nombre": "Ejemplo de caso judicial",
+      "cliente_id": "cl1",
+      "radicado": "2024-00001",
+      "estado": "activo",
+      "notas": "Plantilla de ejemplo.",
+      "tareas": [],
+      "eventos": [],
+      "tiempo": []
+    }
+  ]
+}
