@@ -13,6 +13,8 @@ from docx.shared import Pt
 from pdf2image import convert_from_bytes
 from pdf_compat import PdfReader
 
+from legal_ui.system_deps import render_ocr_dependencies_status
+
 
 st.set_page_config(
     page_title="OCR y matriz de cumplimiento",
@@ -25,6 +27,8 @@ st.caption(
     "Lee documentos digitales o escaneados, extrae las órdenes del fallo "
     "y construye una matriz editable de cumplimiento."
 )
+
+render_ocr_dependencies_status(stop_if_missing=True)
 
 
 PALABRAS_VACIAS = {

@@ -16,6 +16,8 @@ from PIL import ImageEnhance, ImageFilter, ImageOps
 from pdf_compat import PdfReader
 from pytesseract import Output
 
+from legal_ui.system_deps import render_ocr_dependencies_status
+
 
 st.set_page_config(page_title="Auditor Jurídico V2", page_icon="⚖️", layout="wide")
 st.title("⚖️ Auditor jurídico V2")
@@ -23,6 +25,8 @@ st.caption(
     "Motor de cumplimiento por criterios, trazabilidad por documento y página "
     "y control de calidad del OCR."
 )
+
+render_ocr_dependencies_status(stop_if_missing=True)
 
 STOPWORDS = {
     "para","como","esta","este","estos","estas","desde","hasta","sobre","entre",

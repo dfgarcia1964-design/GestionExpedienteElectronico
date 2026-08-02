@@ -42,7 +42,12 @@ def is_google_oauth_configured() -> bool:
 
 def _state_secret() -> str:
     cfg = _oauth_config()
-    return cfg.get("client_secret") or "lexivox-oauth-state"
+    secret = cfg.get("client_secret") or os.getenv("GOOGLE_OAUTH_STATE_SECRET", "").strip()
+    if not secret:
+        raise ValueError(
+            "OAuth no configurado de forma segura: falta client_secret o GOOGLE_OAUTH_STATE_SECRET."
+        )
+    return secret
 
 
 def create_oauth_state() -> str:

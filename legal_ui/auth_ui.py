@@ -73,8 +73,8 @@ def ensure_authenticated() -> bool:
                 st.error("Usuario o contraseña incorrectos.")
 
     st.caption(
-        "Primera instalación: usuario `admin` y contraseña definida en secrets "
-        "(`lexivox_auth.admin_password`) o `Lexivox2026!` por defecto."
+        "Primera instalación: configure `lexivox_auth.admin_password` en "
+        "`.streamlit/secrets.toml` o la variable `LEXIVOX_ADMIN_PASSWORD`."
     )
     return False
 

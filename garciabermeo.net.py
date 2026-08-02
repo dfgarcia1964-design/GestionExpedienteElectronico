@@ -8,6 +8,7 @@ import streamlit as st
 
 from legal_ui.auth import init_auth
 from legal_ui.auth_ui import ensure_authenticated
+from legal_ui.app_logging import setup_logging
 from legal_ui.brand import BRAND_NAME
 from legal_ui.lexivox_theme import LEXIVOX_CSS
 from legal_ui import page_registry
@@ -58,6 +59,7 @@ st.set_page_config(
 
 st.markdown(LEXIVOX_CSS, unsafe_allow_html=True)
 
+setup_logging()
 init_auth()
 if not ensure_authenticated():
     st.stop()

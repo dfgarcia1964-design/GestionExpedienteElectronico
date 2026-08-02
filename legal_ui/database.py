@@ -10,8 +10,10 @@ from pathlib import Path
 from uuid import uuid4
 
 from legal_ui.despacho_store import DATA_DIR
+from legal_ui.app_logging import get_logger
 
 DB_PATH = DATA_DIR / "lexivox.db"
+logger = get_logger(__name__)
 
 
 def _now_iso() -> str:
@@ -38,8 +40,11 @@ def verify_password(password: str, stored_hash: str) -> bool:
 @contextmanager
 def connect():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA synchronous=NORMAL")
     try:
         yield conn
         conn.commit()
@@ -333,9 +338,9 @@ def auth_disabled() -> bool:
 def bootstrap_admin_from_secrets() -> None:
     if user_count() > 0:
         return
-    username = "admin"
-    password = "Lexivox2026!"
-    nombre = "Administrador"
+    username = os.getenv("LEXIVOX_ADMIN_USERNAME", "admin").strip() or "admin"
+    password = os.getenv("LEXIVOX_ADMIN_PASSWORD", "").strip()
+    nombre = os.getenv("LEXIVOX_ADMIN_NOMBRE", "Administrador").strip() or "Administrador"
     try:
         import streamlit as st
 
@@ -343,6 +348,13 @@ def bootstrap_admin_from_secrets() -> None:
         username = str(cfg.get("admin_username", username))
         password = str(cfg.get("admin_password", password))
         nombre = str(cfg.get("admin_nombre", nombre))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Secrets de admin no disponibles: %s", exc)
+
+    if not password:
+        password = "Lexivox2026!"
+        logger.warning(
+            "Contraseña admin por defecto en uso. Configure lexivox_auth.admin_password "
+            "o LEXIVOX_ADMIN_PASSWORD antes de exponer la app a red."
+        )
     create_user(username, password, nombre, rol="admin")

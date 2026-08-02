@@ -8,6 +8,25 @@ from legal_ui.auth import get_current_user_id, use_database_storage
 from legal_ui.despacho_store import DATA_DIR, new_id
 
 EXPEDIENTES_DIR = DATA_DIR / "expedientes"
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB por archivo
+ALLOWED_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".txt", ".csv",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".md", ".json", ".zip",
+}
+
+
+def _validate_upload(filename: str, content: bytes) -> None:
+    if not filename or not filename.strip():
+        raise ValueError("El nombre del archivo está vacío.")
+    if not content:
+        raise ValueError("El archivo está vacío.")
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise ValueError(
+            f"El archivo supera el límite de {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
+        )
+    suffix = Path(filename).suffix.lower()
+    if suffix and suffix not in ALLOWED_EXTENSIONS:
+        raise ValueError(f"Extensión no permitida: {suffix}")
 
 
 def _sanitize_filename(name: str) -> str:
@@ -61,6 +80,7 @@ def _delete_bytes(case_id: str, file_id: str, kind: str, filename: str) -> None:
 
 
 def save_document(case: dict, filename: str, content: bytes, categoria: str = "") -> dict:
+    _validate_upload(filename, content)
     case_id = case["id"]
     safe_name = _sanitize_filename(filename)
     counter = 1
@@ -104,6 +124,7 @@ def save_result(
     content: bytes,
     notas: str = "",
 ) -> dict:
+    _validate_upload(filename, content)
     case_id = case["id"]
     safe_name = _sanitize_filename(filename)
     counter = 1
